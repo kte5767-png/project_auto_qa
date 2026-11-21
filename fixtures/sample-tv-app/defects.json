@@ -1,0 +1,131 @@
+{
+	"version": 1,
+	"note": "reproKeys는 앱 시작 상태(홈, 썸네일 1번 카드 포커스)에서 해당 결함 하나만 켰을 때 결함이 드러나는 키 시퀀스다. target은 채점용 data-testid이며 QA 서비스는 이 값을 검출에 쓰면 안 된다.",
+	"defects": [
+		{
+			"id": "D01",
+			"category": "gui",
+			"screen": "home",
+			"target": "top10-title",
+			"summary": "Top 10 셸프 제목 글자 크기가 작음",
+			"expected": "font-size 28px",
+			"actual": "font-size 26px",
+			"reproKeys": ["DOWN"]
+		},
+		{
+			"id": "D02",
+			"category": "gui",
+			"screen": "home",
+			"target": "promo-button",
+			"summary": "프로모 버튼 배경색이 다름",
+			"expected": "background #F2F2F2",
+			"actual": "background #D9D9D9",
+			"reproKeys": ["DOWN", "DOWN"]
+		},
+		{
+			"id": "D03",
+			"category": "gui",
+			"screen": "home",
+			"target": "top10-card-2",
+			"summary": "Top 10 항목 사이 간격이 넓음",
+			"expected": "항목 간격 40px",
+			"actual": "항목 간격 48px",
+			"reproKeys": ["DOWN"]
+		},
+		{
+			"id": "D04",
+			"category": "gui",
+			"screen": "home",
+			"target": "top10-card-3-image",
+			"summary": "Top 10 3번 카드 이미지가 아래로 6px 어긋남",
+			"expected": "이미지 y 오프셋 0px",
+			"actual": "이미지 y 오프셋 6px",
+			"reproKeys": ["DOWN"]
+		},
+		{
+			"id": "D05",
+			"category": "gui",
+			"screen": "home",
+			"target": "top10-card-1-image",
+			"summary": "Top 10 카드 포커스 시 테두리가 없음 (확대만 됨)",
+			"expected": "1.1배 확대 + 4px 흰색 테두리",
+			"actual": "1.1배 확대만, 테두리 없음",
+			"reproKeys": ["DOWN"]
+		},
+		{
+			"id": "D06",
+			"category": "gui",
+			"screen": "home",
+			"target": "promo-description",
+			"summary": "프로모 설명 영역이 좁아 문구가 말줄임으로 잘림",
+			"expected": "너비 780px, 3줄 표시",
+			"actual": "너비 560px, 1줄 말줄임",
+			"reproKeys": ["DOWN", "DOWN"]
+		},
+		{
+			"id": "D07",
+			"category": "focus",
+			"screen": "home",
+			"target": "top10-card-7",
+			"summary": "Top 10 7번 카드에 포커스가 가지 않음 (도달 불가)",
+			"expected": "6번에서 → 키 입력 시 7번 포커스",
+			"actual": "7번을 건너뛰고 8번 포커스",
+			"reproKeys": ["DOWN", "RIGHT", "RIGHT", "RIGHT", "RIGHT", "RIGHT", "RIGHT"],
+			"baselineFocus": "top10-card-7"
+		},
+		{
+			"id": "D08",
+			"category": "focus",
+			"screen": "home",
+			"target": "gnb-luggage",
+			"summary": "GNB Luggage에서 ↓ 키가 반응하지 않음",
+			"expected": "↓ 키 입력 시 Settings 포커스",
+			"actual": "포커스가 Luggage에 머묾",
+			"reproKeys": ["LEFT", "DOWN", "DOWN"],
+			"baselineFocus": "gnb-settings"
+		},
+		{
+			"id": "D09",
+			"category": "focus",
+			"screen": "home",
+			"target": "promo-button",
+			"summary": "프로모 버튼에서 ↑ 키 입력 시 포커스가 사라짐",
+			"expected": "↑ 키 입력 시 Top 10 카드 포커스",
+			"actual": "포커스된 요소 없음",
+			"reproKeys": ["DOWN", "DOWN", "UP"],
+			"baselineFocus": "top10-card-1"
+		},
+		{
+			"id": "D10",
+			"category": "flow",
+			"screen": "detail",
+			"target": "top10-card-1",
+			"summary": "상세 화면에서 Back으로 돌아오면 원래 카드가 아닌 GNB로 포커스가 감",
+			"expected": "Back 후 진입했던 Top 10 1번 카드 포커스",
+			"actual": "Back 후 GNB Home 포커스",
+			"reproKeys": ["DOWN", "OK", "BACK"],
+			"baselineFocus": "top10-card-1"
+		},
+		{
+			"id": "D11",
+			"category": "flow",
+			"screen": "search",
+			"target": "screen-search",
+			"summary": "검색 화면에서 Back 키가 동작하지 않음",
+			"expected": "Back 후 홈 화면, GNB Search 포커스",
+			"actual": "검색 화면에 머묾",
+			"reproKeys": ["LEFT", "OK", "BACK"],
+			"baselineFocus": "gnb-search"
+		},
+		{
+			"id": "D12",
+			"category": "spec",
+			"screen": "search",
+			"target": "search-field",
+			"summary": "검색 필드 플레이스홀더 문구가 화면설계서와 다름",
+			"expected": "Search your destination or interest.",
+			"actual": "Search destination or interest",
+			"reproKeys": ["LEFT", "OK"]
+		}
+	]
+}
