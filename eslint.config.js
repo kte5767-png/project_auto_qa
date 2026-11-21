@@ -16,5 +16,11 @@ export default defineConfig(
 		rules: {
 			'@typescript-eslint/consistent-type-imports': 'error'
 		}
+	},
+	{
+		files: ['fixtures/*/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}'],
+		languageOptions: {
+			globals: { ...globals.browser }
+		}
 	}
 );

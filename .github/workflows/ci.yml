@@ -20,3 +20,7 @@ jobs:
       - run: pnpm format
       - run: pnpm typecheck
       - run: pnpm test
+      - name: 샘플 TV 앱 정답 결함 검증
+        run: |
+          pnpm --filter @auto-qa/sample-tv-app exec playwright-core install --with-deps chromium
+          pnpm sample:verify
