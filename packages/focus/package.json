@@ -1,0 +1,16 @@
+{
+	"name": "@auto-qa/focus",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "포커스 판별 어댑터와 포커스 방식 자동 탐지",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"devDependencies": {
+		"playwright-core": "^1.65.1"
+	}
+}

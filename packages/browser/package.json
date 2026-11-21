@@ -1,0 +1,16 @@
+{
+	"name": "@auto-qa/browser",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Playwright 브라우저 제어: 실행, 리모컨 키 입력(CDP), 안정화 대기",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"playwright-core": "^1.65.1"
+	}
+}
