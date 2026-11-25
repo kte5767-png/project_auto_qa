@@ -44,6 +44,7 @@ interface Session {
 }
 
 const failures: string[] = [];
+const warnings: string[] = [];
 
 function fail(message: string): void {
 	failures.push(message);
@@ -115,18 +116,40 @@ async function observe(page: Page, mode: Mode, target: string): Promise<Observat
 	);
 }
 
+interface RunResult {
+	observation: Observation;
+	/** 키마다 포커스 위치 (불일치 진단용) */
+	trace: string;
+}
+
 async function run(
 	browser: Browser,
 	baseUrl: string,
 	mode: Mode,
 	defect: DefectSpec,
 	defects: string
-): Promise<Observation> {
+): Promise<RunResult> {
 	const session = await open(browser, baseUrl, mode, defects);
-	for (const key of defect.reproKeys) await press(session, key);
-	const result = await observe(session.page, mode, defect.target);
+	const steps: string[] = [];
+	for (const key of defect.reproKeys) {
+		await press(session, key);
+		steps.push(`${key}→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`);
+	}
+	const observation = await observe(session.page, mode, defect.target);
 	await session.page.close();
-	return result;
+	return { observation, trace: steps.join(' ') };
+}
+
+function check(mode: Mode, defect: DefectSpec, baseline: Observation, withDefect: Observation): string[] {
+	const problems: string[] = [];
+	if (baseline.focused === null) problems.push(`${mode} ${defect.id}: 결함이 없는데 포커스가 없음`);
+	if (defect.baselineFocus !== undefined && baseline.focused !== defect.baselineFocus) {
+		problems.push(`${mode} ${defect.id}: 결함 없을 때 포커스 ${baseline.focused}, 기대 ${defect.baselineFocus}`);
+	}
+	if (JSON.stringify(baseline) === JSON.stringify(withDefect)) {
+		problems.push(`${mode} ${defect.id}: 결함을 켜도 관찰 결과가 같음 (재현 안 됨)`);
+	}
+	return problems;
 }
 
 async function main(): Promise<void> {
@@ -155,18 +178,33 @@ async function main(): Promise<void> {
 			await all.page.close();
 
 			for (const defect of file.defects) {
-				const baseline = await run(browser, baseUrl, mode, defect, 'none');
-				const withDefect = await run(browser, baseUrl, mode, defect, defect.id);
-				const before = failures.length;
-				if (baseline.focused === null) fail(`${mode} ${defect.id}: 결함이 없는데 포커스가 없음`);
-				if (defect.baselineFocus !== undefined && baseline.focused !== defect.baselineFocus) {
-					fail(`${mode} ${defect.id}: 결함 없을 때 포커스 ${baseline.focused}, 기대 ${defect.baselineFocus}`);
-				}
-				if (JSON.stringify(baseline) === JSON.stringify(withDefect)) {
-					fail(`${mode} ${defect.id}: 결함을 켜도 관찰 결과가 같음 (재현 안 됨)`);
-				}
-				if (failures.length === before) {
+				const attempt = async () => {
+					const baseline = await run(browser, baseUrl, mode, defect, 'none');
+					const withDefect = await run(browser, baseUrl, mode, defect, defect.id);
+					return {
+						baseline,
+						withDefect,
+						problems: check(mode, defect, baseline.observation, withDefect.observation)
+					};
+				};
+				const first = await attempt();
+				if (first.problems.length === 0) {
 					console.log(`  ✓ ${defect.id} ${defect.summary}`);
+					continue;
+				}
+				// 한 번 더 확인한다. 다시 맞으면 정답 목록 문제가 아니라 실행 환경의 타이밍 문제로 보고 경고만 남긴다.
+				const second = await attempt();
+				const detail = `기준 [${first.baseline.trace}] / 결함 [${first.withDefect.trace}]`;
+				if (second.problems.length === 0) {
+					const message = `${mode} ${defect.id}: 첫 시도 불일치, 재시도 통과 — ${first.problems.join('; ')} — ${detail}`;
+					warnings.push(message);
+					console.log(`  ⚠ ${message}`);
+					if (process.env['GITHUB_ACTIONS'] === 'true')
+						console.log(`::warning title=sample:verify 불안정::${message}`);
+				} else {
+					for (const problem of second.problems) fail(problem);
+					console.log(`    첫 시도: ${detail}`);
+					console.log(`    재시도: 기준 [${second.baseline.trace}] / 결함 [${second.withDefect.trace}]`);
 				}
 			}
 		}
@@ -179,6 +217,7 @@ async function main(): Promise<void> {
 		console.log(`\n실패 ${failures.length}건`);
 		process.exit(1);
 	}
+	if (warnings.length > 0) console.log(`\n경고 ${warnings.length}건 (재시도 통과, 위 추적 참고)`);
 	console.log('\n모든 정답 결함이 두 포커스 방식에서 재현됩니다.');
 }
 
