@@ -33,6 +33,22 @@ importers:
         specifier: ^5.1.1
         version: 5.1.1(@types/node@22.20.5)(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
 
+  apps/figma-plugin:
+    dependencies:
+      '@auto-qa/figma':
+        specifier: workspace:*
+        version: link:../../packages/figma
+    devDependencies:
+      '@figma/plugin-typings':
+        specifier: ^1.143.0
+        version: 1.143.0
+      acorn:
+        specifier: ^8.15.0
+        version: 8.19.0
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+
   fixtures/sample-tv-app:
     dependencies:
       '@enact/core':
@@ -110,6 +126,12 @@ importers:
         specifier: ^8.15.0
         version: 8.19.0
 
+  packages/figma:
+    dependencies:
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/focus:
     dependencies:
       '@auto-qa/core':
@@ -149,6 +171,16 @@ importers:
       vite:
         specifier: ^8.3.8
         version: 8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
+  spikes/p0-5-figma:
+    dependencies:
+      '@auto-qa/figma':
+        specifier: workspace:*
+        version: link:../../packages/figma
     devDependencies:
       tsx:
         specifier: ^4.23.15
@@ -430,6 +462,9 @@ packages:
 
   '@fast-csv/parse@4.3.6':
     resolution: {integrity: sha512-uRsLYksqpbDmWaSmzvJcuApSEe38+6NQZBUsuAyMZKqHxH0g1wcJgsKUvN3WC8tewaqFjBMMGrkHmC+T7k8LvA==}
+
+  '@figma/plugin-typings@1.143.0':
+    resolution: {integrity: sha512-7oP0XwTiuAuQPRNmuPX4PeRP5fjLMnRZ6Ed7Ybr61JoW9Os04Eml/XqYE3kyvohcFQfYXsRK5sqCLaKzc8qnZg==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2121,6 +2156,8 @@ snapshots:
       lodash.isnil: 4.0.0
       lodash.isundefined: 3.0.1
       lodash.uniq: 4.5.0
+
+  '@figma/plugin-typings@1.143.0': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

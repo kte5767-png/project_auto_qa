@@ -1,0 +1,18 @@
+{
+	"name": "@auto-qa/figma",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Figma 플러그인 내보내기 형식과 정규화: 숨김·경계 밖 제외, 반복 요소 묶기, 형제 대비 포커스 요소 추정 (D-009~D-011)",
+	"exports": {
+		".": "./src/index.ts",
+		"./format": "./src/exportFormat.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/core": "workspace:*"
+	}
+}
