@@ -28,6 +28,8 @@ export class BrowserDriver implements Driver {
 			deviceScaleFactor: 1
 		});
 		const cdp = await page.context().newCDPSession(page);
+		// 앱이 뜨기 전에 창 포커스를 확정한다 (늦게 오는 창 focus 이벤트가 앱의 시작 포커스를 바꾸지 않도록)
+		await page.bringToFront();
 		await page.goto(url);
 		return new BrowserDriver(page, cdp, options.keyMap ?? WEBOS_KEY_MAP);
 	}

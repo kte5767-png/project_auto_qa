@@ -64,6 +64,9 @@ async function open(browser: Browser, baseUrl: string, mode: Mode, defects: stri
 		if (msg.type() === 'error') consoleErrors.push(msg.text());
 	});
 	page.on('pageerror', (err) => consoleErrors.push(err.message));
+	// 앱이 뜨기 전에 창 포커스를 확정한다. 나중에 창 focus 이벤트가 오면 Enact Spotlight가
+	// 마지막 포커스 요소로 포커스를 옮겨 시작 상태(thumb-1)가 흔들린다 (CI에서 간헐 불일치의 원인).
+	await page.bringToFront();
 	// tsx(esbuild keepNames)가 page.evaluate 함수 소스에 넣는 __name 호출 대비 (검증 도구 전용)
 	await page.addInitScript('globalThis.__name = globalThis.__name || function (f) { return f; };');
 	await page.goto(`${baseUrl}?focus=${mode}&defects=${defects}`);
