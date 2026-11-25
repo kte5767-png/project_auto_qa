@@ -1,0 +1,17 @@
+{
+	"name": "@auto-qa/tc",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "TC 엑셀: TC 프로필 자동 제안, 공통 TC 모델로 정규화, 자동화 가능성 라벨, 결과 칸 위치 (D-021)",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"exceljs": "^4.4.0",
+		"jszip": "^3.10.1"
+	}
+}

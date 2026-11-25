@@ -1,0 +1,17 @@
+{
+	"name": "@auto-qa/spike-p0-7-tc",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-7 TC 엑셀 정규화 스파이크: TC 프로필 자동 제안, 정규화, 자동화 라벨 통계, 결과 칸 쓰기 확인",
+	"scripts": {
+		"start": "tsx run.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/tc": "workspace:*"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}
