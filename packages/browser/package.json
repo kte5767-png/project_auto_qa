@@ -3,7 +3,7 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Playwright 브라우저 제어: 실행, 리모컨 키 입력(CDP), 안정화 대기",
+	"description": "브라우저 시뮬레이터 드라이버: Playwright 실행, 리모컨 키 입력(CDP), 안정화 대기",
 	"exports": {
 		".": "./src/index.ts"
 	},
@@ -11,6 +11,7 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
+		"@auto-qa/core": "workspace:*",
 		"playwright-core": "^1.65.1"
 	}
 }

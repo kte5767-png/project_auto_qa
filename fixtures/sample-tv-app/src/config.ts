@@ -60,3 +60,29 @@ export function parseConfig(search: string, knownDefectIds: readonly string[] = 
 
 	return { focusMode: focusRaw, backKeyCode, defects };
 }
+
+/**
+ * webOS 앱 실행 인자를 쿼리 문자열로 바꾼다. TV에 설치한 샘플 앱은 URL 쿼리 대신
+ * `ares-launch --params "{'focus':'class','defects':'none'}"`로 설정을 받는다.
+ * 실행 인자는 JSON 문자열(PalmSystem.launchParams / webOSSystem.launchParams) 또는 객체다.
+ * focus·back·defects만 옮기고, 해석할 수 없으면 빈 문자열(기본값)을 돌려준다.
+ */
+export function launchParamsToSearch(raw: unknown): string {
+	let value: unknown = raw;
+	if (typeof raw === 'string') {
+		if (raw.trim() === '') return '';
+		try {
+			value = JSON.parse(raw);
+		} catch {
+			return '';
+		}
+	}
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) return '';
+	const params = new URLSearchParams();
+	for (const key of ['focus', 'back', 'defects']) {
+		const v = (value as Record<string, unknown>)[key];
+		if (typeof v === 'string' || typeof v === 'number') params.set(key, String(v));
+	}
+	const text = params.toString();
+	return text === '' ? '' : `?${text}`;
+}

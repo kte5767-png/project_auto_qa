@@ -24,3 +24,14 @@ jobs:
         run: |
           pnpm --filter @auto-qa/sample-tv-app exec playwright-core install --with-deps chromium
           pnpm sample:verify
+      - name: 가짜 TV로 실기기 드라이버 흐름 확인 (P0-6)
+        run: |
+          pnpm --filter @auto-qa/spike-p0-6-device fake-tv --legacy-engine > fake-tv.log 2>&1 &
+          for i in $(seq 1 90); do grep -q "가짜 TV 실행 중" fake-tv.log && break; sleep 1; done
+          cat fake-tv.log
+          pnpm spike:device focus --sample spotlight --reset reload
+        env:
+          WEBOS_HOST: 127.0.0.1
+          WEBOS_INSPECTOR_PORT: '9998'
+          WEBOS_SSAP_PORT: '1'
+          WEBOS_SSAP_PLAIN_PORT: '3000'

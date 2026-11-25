@@ -1,0 +1,18 @@
+{
+	"name": "@auto-qa/spike-shared",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "스파이크 공용: 포커스 판별 측정 흐름과 리포트 (시뮬레이터 P0-2, 실기기 P0-6)",
+	"exports": {
+		".": "./index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/core": "workspace:*",
+		"@auto-qa/focus": "workspace:*",
+		"@auto-qa/sample-tv-app": "workspace:*"
+	}
+}

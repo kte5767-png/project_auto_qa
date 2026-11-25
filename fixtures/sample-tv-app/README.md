@@ -10,6 +10,18 @@ pnpm sample:verify              # 정답 결함이 실제로 재현되는지 검
 CHROME_PATH=/usr/bin/google-chrome pnpm sample:verify   # 로컬 Chrome 사용 시
 ```
 
+## TV(webOS)에 설치
+
+```bash
+pnpm --filter @auto-qa/sample-tv-app build:webos   # dist-webos/ (앱 ID com.autoqa.sampletvapp)
+pnpm spike:device sample-ipk                        # 빌드 + ares-package로 ipk 만들기 (spikes/p0-6-device)
+```
+
+- webOS 앱은 file:// 경로에서 열리므로 ES 모듈 대신 일반 스크립트 하나로 빌드하고, 문법은 webOS 5.x(Chromium 68)에 맞춰 낮춥니다 (`vite.webos.config.ts`).
+- TV에서는 URL 쿼리 대신 **앱 실행 인자**로 같은 설정을 넘깁니다: `ares-launch -d tv com.autoqa.sampletvapp -p "{'focus':'class','defects':'none'}"`. URL 쿼리가 있으면 쿼리가 먼저입니다.
+- Back(461)은 앱이 직접 처리합니다 (`appinfo.json`의 `disableBackHistoryAPI`).
+- 채점용 정답 읽기 스크립트는 `src/truth.ts`입니다. 브라우저와 TV 모두에서 같은 스크립트를 씁니다 (D-018, QA 서비스 검출 로직에서는 쓰지 않음).
+
 ## URL 파라미터
 
 | 파라미터  | 값                        | 기본값      | 설명                                                                                                                                                |

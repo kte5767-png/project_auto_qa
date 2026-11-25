@@ -57,38 +57,83 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.3.0
         version: 6.3.0(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
+      acorn:
+        specifier: ^8.15.0
+        version: 8.19.0
       playwright-core:
         specifier: ^1.65.1
         version: 1.65.1
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       vite:
         specifier: ^8.3.8
         version: 8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)
 
   packages/browser:
     dependencies:
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../core
       playwright-core:
         specifier: ^1.65.1
         version: 1.65.1
 
-  packages/core: {}
+  packages/core:
+    devDependencies:
+      acorn:
+        specifier: ^8.15.0
+        version: 8.19.0
+
+  packages/device-webos:
+    dependencies:
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../core
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
+      ws:
+        specifier: ^8.18.3
+        version: 8.23.0
+    devDependencies:
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.2
+      acorn:
+        specifier: ^8.15.0
+        version: 8.19.0
 
   packages/focus:
+    dependencies:
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
-      playwright-core:
-        specifier: ^1.65.1
-        version: 1.65.1
+      acorn:
+        specifier: ^8.15.0
+        version: 8.19.0
 
   spikes/p0-2-focus:
     dependencies:
       '@auto-qa/browser':
         specifier: workspace:*
         version: link:../../packages/browser
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@auto-qa/focus':
         specifier: workspace:*
         version: link:../../packages/focus
-      playwright-core:
-        specifier: ^1.65.1
-        version: 1.65.1
+      '@auto-qa/sample-tv-app':
+        specifier: workspace:*
+        version: link:../../fixtures/sample-tv-app
+      '@auto-qa/spike-shared':
+        specifier: workspace:*
+        version: link:../shared
       vite:
         specifier: ^8.3.8
         version: 8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)
@@ -96,6 +141,49 @@ importers:
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+
+  spikes/p0-6-device:
+    dependencies:
+      '@auto-qa/browser':
+        specifier: workspace:*
+        version: link:../../packages/browser
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@auto-qa/device-webos':
+        specifier: workspace:*
+        version: link:../../packages/device-webos
+      '@auto-qa/focus':
+        specifier: workspace:*
+        version: link:../../packages/focus
+      '@auto-qa/sample-tv-app':
+        specifier: workspace:*
+        version: link:../../fixtures/sample-tv-app
+      '@auto-qa/spike-shared':
+        specifier: workspace:*
+        version: link:../shared
+      ws:
+        specifier: ^8.18.3
+        version: 8.23.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.2
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
+  spikes/shared:
+    dependencies:
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@auto-qa/focus':
+        specifier: workspace:*
+        version: link:../../packages/focus
+      '@auto-qa/sample-tv-app':
+        specifier: workspace:*
+        version: link:../../fixtures/sample-tv-app
 
 packages:
 
@@ -471,6 +559,9 @@ packages:
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
+
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
@@ -493,6 +584,9 @@ packages:
 
   '@types/react@19.3.0':
     resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@typescript-eslint/eslint-plugin@8.73.0':
     resolution: {integrity: sha512-UkygMFer53Yzn29MCYFTHf34hGXf5KJhiDWfIm1tXtXRrym1CS6l5H9Y3yCtPWChpC0/f93H88gdj8tN0dd4kw==}
@@ -1157,6 +1251,18 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
 
+  ws@8.23.0:
+    resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -1432,6 +1538,10 @@ snapshots:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
 
+  '@types/cross-spawn@6.0.6':
+    dependencies:
+      '@types/node': 22.20.5
+
   '@types/deep-eql@4.0.2': {}
 
   '@types/esrecurse@4.3.1': {}
@@ -1451,6 +1561,10 @@ snapshots:
   '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.4
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 22.20.5
 
   '@typescript-eslint/eslint-plugin@8.73.0(@typescript-eslint/parser@8.73.0(eslint@10.15.0)(typescript@6.0.3))(eslint@10.15.0)(typescript@6.0.3)':
     dependencies:
@@ -2057,5 +2171,7 @@ snapshots:
   why-is-node-running@3.2.1: {}
 
   word-wrap@1.2.5: {}
+
+  ws@8.23.0: {}
 
   yocto-queue@0.1.0: {}

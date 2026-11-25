@@ -14,6 +14,8 @@ pnpm spike:focus --url http://localhost:8091       # 실제 앱 (정답 없음 �
 - 옵션: `--keys "RIGHT*4 DOWN*3 …"`(기본 20회), `--modes spotlight,class`, `--out <폴더>`, `--headed`(창 띄우기)
 - 결과: `out/report.html`(단계별 스크린샷 + 어댑터별 판단 상자), `out/results.json`
 
+측정 흐름과 리포트는 `spikes/shared`에 있으며, 실기기 스파이크(`spikes/p0-6-device`)도 같은 흐름을 씁니다. 드라이버만 브라우저(`BrowserDriver`)와 TV(`WebOsDriver`)로 다릅니다.
+
 ## 하는 일
 
 1. **자동 탐지**: 방향키 5번(↓ → → ← ↑)을 누르며 상태를 모아 어댑터 후보를 신뢰도 순으로 냅니다.

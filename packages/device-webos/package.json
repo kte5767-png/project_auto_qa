@@ -1,0 +1,24 @@
+{
+	"name": "@auto-qa/device-webos",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "webOS 실기기 드라이버: ares CLI(설치·실행), SSAP(리모컨 입력), Web Inspector CDP(DOM·스타일·캡처) (D-023)",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing/fakeTv.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/core": "workspace:*",
+		"cross-spawn": "^7.0.6",
+		"ws": "^8.18.3"
+	},
+	"devDependencies": {
+		"@types/cross-spawn": "^6.0.6",
+		"@types/ws": "^8.18.1",
+		"acorn": "^8.15.0"
+	}
+}
