@@ -57,7 +57,10 @@ async function settle(page: Page): Promise<void> {
 	if (!result.stable) console.log(`  (안정화 시간 초과 ${result.waitedMs}ms)`);
 }
 
-async function open(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
+const START_FOCUS = 'thumb-1';
+const OPEN_ATTEMPTS = 3;
+
+async function openOnce(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
 	const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 	const consoleErrors: string[] = [];
 	page.on('console', (msg) => {
@@ -65,17 +68,37 @@ async function open(browser: Browser, baseUrl: string, mode: Mode, defects: stri
 	});
 	page.on('pageerror', (err) => consoleErrors.push(err.message));
 	// 창 포커스를 항상 "포커스됨"으로 고정한다. 창 blur/focus 이벤트가 오면 Enact Spotlight가 현재 포커스를 풀거나
-	// 다른 요소로 옮겨 시작 상태(thumb-1)가 흔들린다 (CI에서 간헐 불일치의 원인).
-	const focusCdp = await page.context().newCDPSession(page);
-	await focusCdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+	// 다른 요소로 옮길 수 있다.
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
 	await page.bringToFront();
 	// tsx(esbuild keepNames)가 page.evaluate 함수 소스에 넣는 __name 호출 대비 (검증 도구 전용)
 	await page.addInitScript('globalThis.__name = globalThis.__name || function (f) { return f; };');
 	await page.goto(`${baseUrl}?focus=${mode}&defects=${defects}`);
 	await page.waitForSelector('[data-testid="screen-home"]');
 	await settle(page);
-	const cdp = await page.context().newCDPSession(page);
 	return { page, cdp, consoleErrors };
+}
+
+/**
+ * 시작 상태(홈, thumb-1 포커스)로 앱을 연다. CI에서 드물게 시작 포커스가 비어 있는 경우가 있어
+ * (원인 조사 중, 로컬에서는 재현 안 됨) 최대 OPEN_ATTEMPTS번 다시 열고, 다시 연 사실은 경고로 남긴다.
+ * 결함 검증은 "같은 시작 상태에서 키를 눌렀을 때"를 비교하는 것이므로 시작 상태부터 맞춘다.
+ */
+async function open(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
+	let session = await openOnce(browser, baseUrl, mode, defects);
+	for (let attempt = 2; attempt <= OPEN_ATTEMPTS; attempt++) {
+		const start = await observe(session.page, mode, 'app');
+		if (start.focused === START_FOCUS) return session;
+		const message = `${mode} defects=${defects}: 시작 포커스 ${start.focused ?? '없음'} → 다시 엶 (${attempt}/${OPEN_ATTEMPTS})`;
+		warnings.push(message);
+		console.log(`  ⚠ ${message}`);
+		if (process.env['GITHUB_ACTIONS'] === 'true')
+			console.log(`::warning title=sample:verify 시작 상태::${message}`);
+		await session.page.close();
+		session = await openOnce(browser, baseUrl, mode, defects);
+	}
+	return session;
 }
 
 async function press(session: Session, key: RemoteKey): Promise<void> {
