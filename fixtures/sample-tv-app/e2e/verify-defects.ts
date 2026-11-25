@@ -6,11 +6,13 @@
  *  3) focus·flow 결함은 결함이 없을 때 baselineFocus에 포커스가 있는지
  * 를 확인한다.
  *
- * 실행: pnpm --filter @auto-qa/sample-tv-app verify
+ * 실행: pnpm sample:verify
  * 로컬 Chrome을 쓰려면 CHROME_PATH 환경 변수를 지정한다.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { stableWaitScript } from '@auto-qa/core';
+import type { StableResult } from '@auto-qa/core';
 import { chromium } from 'playwright-core';
 import type { Browser, CDPSession, Page } from 'playwright-core';
 import { build, preview } from 'vite';
@@ -48,10 +50,10 @@ function fail(message: string): void {
 	console.log(`  ✗ ${message}`);
 }
 
-async function nextFrames(page: Page): Promise<void> {
-	await page.evaluate(
-		() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-	);
+/** 고정 프레임 수 대신 안정화 대기 (실기기·시뮬레이터와 같은 스크립트, 설계 7.6). 느린 CI에서도 포커스 복원까지 기다린다 */
+async function settle(page: Page): Promise<void> {
+	const result = await page.evaluate<StableResult>(stableWaitScript());
+	if (!result.stable) console.log(`  (안정화 시간 초과 ${result.waitedMs}ms)`);
 }
 
 async function open(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
@@ -61,9 +63,11 @@ async function open(browser: Browser, baseUrl: string, mode: Mode, defects: stri
 		if (msg.type() === 'error') consoleErrors.push(msg.text());
 	});
 	page.on('pageerror', (err) => consoleErrors.push(err.message));
+	// tsx(esbuild keepNames)가 page.evaluate 함수 소스에 넣는 __name 호출 대비 (검증 도구 전용)
+	await page.addInitScript('globalThis.__name = globalThis.__name || function (f) { return f; };');
 	await page.goto(`${baseUrl}?focus=${mode}&defects=${defects}`);
 	await page.waitForSelector('[data-testid="screen-home"]');
-	await nextFrames(page);
+	await settle(page);
 	const cdp = await page.context().newCDPSession(page);
 	return { page, cdp, consoleErrors };
 }
@@ -73,7 +77,7 @@ async function press(session: Session, key: RemoteKey): Promise<void> {
 	const base = { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, key: name };
 	await session.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
 	await session.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
-	await nextFrames(session.page);
+	await settle(session.page);
 }
 
 async function observe(page: Page, mode: Mode, target: string): Promise<Observation> {

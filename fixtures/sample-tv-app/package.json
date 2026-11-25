@@ -13,7 +13,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"verify": "node e2e/verify-defects.ts",
+		"verify": "tsx e2e/verify-defects.ts",
 		"build:webos": "tsx scripts/build-webos.ts"
 	},
 	"dependencies": {
@@ -23,6 +23,7 @@
 		"react-dom": "^19.3.1"
 	},
 	"devDependencies": {
+		"@auto-qa/core": "workspace:*",
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",
 		"@vitejs/plugin-react": "^6.3.0",
