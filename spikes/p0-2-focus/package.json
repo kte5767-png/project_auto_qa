@@ -1,0 +1,20 @@
+{
+	"name": "@auto-qa/spike-p0-2-focus",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-2 포커스 판별 + 프로필 탐지 스파이크",
+	"scripts": {
+		"start": "tsx run.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/browser": "workspace:*",
+		"@auto-qa/focus": "workspace:*",
+		"playwright-core": "^1.65.1",
+		"vite": "^8.3.8"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}

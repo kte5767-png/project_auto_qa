@@ -17,6 +17,7 @@
 		"test:watch": "vitest",
 		"sample:dev": "pnpm --filter @auto-qa/sample-tv-app dev",
 		"sample:verify": "pnpm --filter @auto-qa/sample-tv-app verify",
+		"spike:focus": "pnpm --filter @auto-qa/spike-p0-2-focus start",
 		"check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
 		"db:up": "docker compose up -d",
 		"db:down": "docker compose down"

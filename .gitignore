@@ -7,6 +7,7 @@ coverage/
 .data/
 
 # 테스트 산출물
+spikes/*/out/
 playwright-report/
 test-results/
 
