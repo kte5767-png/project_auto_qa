@@ -7,7 +7,17 @@ export interface BrowserDriverOptions {
 	/** 리모컨 키 → 페이지 키 이벤트 매핑. 기본: webOS */
 	keyMap?: KeyMap;
 	viewport?: { width: number; height: number };
+	/**
+	 * 마우스 이벤트를 앱에 전달하지 않는다 (기본 true, pointerPolicy = 마우스 이벤트 금지).
+	 * 헤드리스 Chrome은 화면 표시·레이아웃 변경 때 합성 마우스 이벤트를 만들고, 공간 탐색 라이브러리(Enact Spotlight 등)는
+	 * 이를 받으면 포인터 모드로 바뀌어 리모컨 포커스 이동을 무시한다. TV에서 매직 리모컨 포인터를 숨긴 상태와 같게 만든다.
+	 */
+	suppressMouse?: boolean;
 }
+
+const SUPPRESS_MOUSE_SCRIPT = `['mousemove','mouseover','mouseout','mouseenter','mouseleave','mousedown','mouseup','click','wheel'].forEach(function (type) {
+	window.addEventListener(type, function (event) { event.stopImmediatePropagation(); }, true);
+});`;
 
 /**
  * 브라우저 시뮬레이터 드라이버 (D-020). 실기기 드라이버와 같은 `Driver` 인터페이스를 구현한다.
@@ -28,9 +38,7 @@ export class BrowserDriver implements Driver {
 			deviceScaleFactor: 1
 		});
 		const cdp = await page.context().newCDPSession(page);
-		// 창 포커스를 "포커스됨"으로 고정한다. 창 blur/focus 이벤트에 공간 탐색 라이브러리(Enact Spotlight 등)가
-		// 포커스를 풀거나 옮겨 시작 상태가 흔들리지 않도록 (실기기에서는 시스템 팝업 등으로 실제로 생길 수 있는 상황)
-		await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+		if (options.suppressMouse !== false) await page.addInitScript(SUPPRESS_MOUSE_SCRIPT);
 		await page.bringToFront();
 		await page.goto(url);
 		return new BrowserDriver(page, cdp, options.keyMap ?? WEBOS_KEY_MAP);

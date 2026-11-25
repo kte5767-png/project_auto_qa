@@ -43,6 +43,22 @@ async function main(): Promise<void> {
 	});
 	const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 	const cdp = await page.context().newCDPSession(page);
+	// 리모컨 5방향만 검증: 헤드리스 Chrome의 합성 마우스 이벤트로 Spotlight가 포인터 모드가 되지 않게 한다 (BrowserDriver와 같음)
+	await page.addInitScript(() => {
+		for (const type of [
+			'mousemove',
+			'mouseover',
+			'mouseout',
+			'mouseenter',
+			'mouseleave',
+			'mousedown',
+			'mouseup',
+			'click',
+			'wheel'
+		]) {
+			window.addEventListener(type, (event) => event.stopImmediatePropagation(), true);
+		}
+	});
 	if (values['legacy-engine']) {
 		await page.addInitScript(() => {
 			Reflect.deleteProperty(Document.prototype, 'getAnimations');

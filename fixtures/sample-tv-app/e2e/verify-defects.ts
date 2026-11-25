@@ -58,6 +58,9 @@ async function settle(page: Page): Promise<void> {
 }
 
 const START_FOCUS = 'thumb-1';
+const SUPPRESS_MOUSE_SCRIPT = `['mousemove','mouseover','mouseout','mouseenter','mouseleave','mousedown','mouseup','click','wheel'].forEach(function (type) {
+	window.addEventListener(type, function (event) { event.stopImmediatePropagation(); }, true);
+});`;
 const OPEN_ATTEMPTS = 3;
 
 async function openOnce(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
@@ -67,10 +70,11 @@ async function openOnce(browser: Browser, baseUrl: string, mode: Mode, defects: 
 		if (msg.type() === 'error') consoleErrors.push(msg.text());
 	});
 	page.on('pageerror', (err) => consoleErrors.push(err.message));
-	// 창 포커스를 항상 "포커스됨"으로 고정한다. 창 blur/focus 이벤트가 오면 Enact Spotlight가 현재 포커스를 풀거나
-	// 다른 요소로 옮길 수 있다.
 	const cdp = await page.context().newCDPSession(page);
-	await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+	// 마우스 이벤트를 앱에 전달하지 않는다 (리모컨 5방향 검증, 포인터 숨김 상태).
+	// 헤드리스 Chrome이 화면 표시·레이아웃 변경 때 만드는 합성 마우스 이벤트에 Enact Spotlight가 포인터 모드로 바뀌면
+	// Spotlight.focus()가 무시되어 시작 포커스가 비거나 키가 먹지 않는다 (CI 간헐 불일치의 원인).
+	await page.addInitScript(SUPPRESS_MOUSE_SCRIPT);
 	await page.bringToFront();
 	// tsx(esbuild keepNames)가 page.evaluate 함수 소스에 넣는 __name 호출 대비 (검증 도구 전용)
 	await page.addInitScript('globalThis.__name = globalThis.__name || function (f) { return f; };');
@@ -81,8 +85,8 @@ async function openOnce(browser: Browser, baseUrl: string, mode: Mode, defects: 
 }
 
 /**
- * 시작 상태(홈, thumb-1 포커스)로 앱을 연다. CI에서 드물게 시작 포커스가 비어 있는 경우가 있어
- * (원인 조사 중, 로컬에서는 재현 안 됨) 최대 OPEN_ATTEMPTS번 다시 열고, 다시 연 사실은 경고로 남긴다.
+ * 시작 상태(홈, thumb-1 포커스)로 앱을 연다. 시작 포커스가 맞지 않으면 최대 OPEN_ATTEMPTS번 다시 열고,
+ * 다시 연 사실은 경고로 남긴다 (안전장치. 원인이던 합성 마우스 이벤트는 위에서 막는다).
  * 결함 검증은 "같은 시작 상태에서 키를 눌렀을 때"를 비교하는 것이므로 시작 상태부터 맞춘다.
  */
 async function open(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
