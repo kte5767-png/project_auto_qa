@@ -64,8 +64,10 @@ async function open(browser: Browser, baseUrl: string, mode: Mode, defects: stri
 		if (msg.type() === 'error') consoleErrors.push(msg.text());
 	});
 	page.on('pageerror', (err) => consoleErrors.push(err.message));
-	// 앱이 뜨기 전에 창 포커스를 확정한다. 나중에 창 focus 이벤트가 오면 Enact Spotlight가
-	// 마지막 포커스 요소로 포커스를 옮겨 시작 상태(thumb-1)가 흔들린다 (CI에서 간헐 불일치의 원인).
+	// 창 포커스를 항상 "포커스됨"으로 고정한다. 창 blur/focus 이벤트가 오면 Enact Spotlight가 현재 포커스를 풀거나
+	// 다른 요소로 옮겨 시작 상태(thumb-1)가 흔들린다 (CI에서 간헐 불일치의 원인).
+	const focusCdp = await page.context().newCDPSession(page);
+	await focusCdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
 	await page.bringToFront();
 	// tsx(esbuild keepNames)가 page.evaluate 함수 소스에 넣는 __name 호출 대비 (검증 도구 전용)
 	await page.addInitScript('globalThis.__name = globalThis.__name || function (f) { return f; };');
@@ -133,7 +135,7 @@ async function run(
 	defects: string
 ): Promise<RunResult> {
 	const session = await open(browser, baseUrl, mode, defects);
-	const steps: string[] = [];
+	const steps: string[] = [`START→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`];
 	for (const key of defect.reproKeys) {
 		await press(session, key);
 		steps.push(`${key}→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`);

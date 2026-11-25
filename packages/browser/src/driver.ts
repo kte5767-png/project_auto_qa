@@ -28,7 +28,9 @@ export class BrowserDriver implements Driver {
 			deviceScaleFactor: 1
 		});
 		const cdp = await page.context().newCDPSession(page);
-		// 앱이 뜨기 전에 창 포커스를 확정한다 (늦게 오는 창 focus 이벤트가 앱의 시작 포커스를 바꾸지 않도록)
+		// 창 포커스를 "포커스됨"으로 고정한다. 창 blur/focus 이벤트에 공간 탐색 라이브러리(Enact Spotlight 등)가
+		// 포커스를 풀거나 옮겨 시작 상태가 흔들리지 않도록 (실기기에서는 시스템 팝업 등으로 실제로 생길 수 있는 상황)
+		await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
 		await page.bringToFront();
 		await page.goto(url);
 		return new BrowserDriver(page, cdp, options.keyMap ?? WEBOS_KEY_MAP);
