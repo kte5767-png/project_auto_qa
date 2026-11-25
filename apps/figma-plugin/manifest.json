@@ -1,0 +1,13 @@
+{
+	"name": "Auto QA Export",
+	"id": "auto-qa-export-dev",
+	"api": "1.0.0",
+	"main": "dist/code.js",
+	"ui": "dist/ui.html",
+	"editorType": ["figma"],
+	"documentAccess": "dynamic-page",
+	"networkAccess": {
+		"allowedDomains": ["none"],
+		"reasoning": "디자인 데이터는 사용자 PC에 JSON 파일로만 저장하고 외부로 보내지 않습니다."
+	}
+}
