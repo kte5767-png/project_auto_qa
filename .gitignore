@@ -1,6 +1,8 @@
 # 의존성·빌드 산출물
 node_modules/
 dist/
+dist-webos/
+*.ipk
 coverage/
 
 # 로컬 데이터 (스크린샷, 트레이스 등 BlobStore 저장 위치)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigError, DEFAULT_BACK_KEY_CODE, parseConfig } from './config';
+import { ConfigError, DEFAULT_BACK_KEY_CODE, launchParamsToSearch, parseConfig } from './config';
 
 const IDS = ['D01', 'D02', 'D03'];
 
@@ -46,5 +46,29 @@ describe('parseConfig', () => {
 
 	it('알 수 없는 결함 id는 오류', () => {
 		expect(() => parseConfig('?defects=D01,D99', IDS)).toThrow(/D99/);
+	});
+});
+
+describe('launchParamsToSearch', () => {
+	it('webOS 실행 인자(JSON 문자열)를 쿼리 문자열로 바꾼다', () => {
+		const search = launchParamsToSearch('{"focus":"class","defects":"D05,D07","back":461}');
+		expect(parseConfig(search, ['D05', 'D07']).focusMode).toBe('class');
+		expect(search).toBe('?focus=class&back=461&defects=D05%2CD07');
+	});
+
+	it('객체도 받는다', () => {
+		expect(launchParamsToSearch({ focus: 'spotlight' })).toBe('?focus=spotlight');
+	});
+
+	it('없거나 해석할 수 없으면 빈 문자열(기본값)', () => {
+		expect(launchParamsToSearch(undefined)).toBe('');
+		expect(launchParamsToSearch('')).toBe('');
+		expect(launchParamsToSearch('{oops')).toBe('');
+		expect(launchParamsToSearch('[1,2]')).toBe('');
+		expect(launchParamsToSearch('{}')).toBe('');
+	});
+
+	it('다른 키와 객체 값은 무시한다', () => {
+		expect(launchParamsToSearch({ focus: 'class', other: 'x', defects: { a: 1 } })).toBe('?focus=class');
 	});
 });

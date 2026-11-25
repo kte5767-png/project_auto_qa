@@ -1,6 +1,6 @@
 export type { FocusAdapterId, FocusCandidate, FocusReading, FocusState, ElementInfo, StyleSig } from './types';
 export type { CollectOptions } from './collect';
-export { DEFAULT_COLLECT_OPTIONS, collectFocusState } from './collect';
+export { DEFAULT_COLLECT_OPTIONS, collectFocusScript, collectFocusState } from './collect';
 export { StyleDiffTracker, readActiveElement, readEnactSpotlight, readSelector } from './adapters';
 export type { DetectOptions } from './detect';
 export { DEFAULT_DETECT_OPTIONS, detectFocusAdapters } from './detect';

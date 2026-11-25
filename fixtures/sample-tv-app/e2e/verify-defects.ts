@@ -6,11 +6,13 @@
  *  3) focus·flow 결함은 결함이 없을 때 baselineFocus에 포커스가 있는지
  * 를 확인한다.
  *
- * 실행: pnpm --filter @auto-qa/sample-tv-app verify
+ * 실행: pnpm sample:verify
  * 로컬 Chrome을 쓰려면 CHROME_PATH 환경 변수를 지정한다.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { stableWaitScript } from '@auto-qa/core';
+import type { StableResult } from '@auto-qa/core';
 import { chromium } from 'playwright-core';
 import type { Browser, CDPSession, Page } from 'playwright-core';
 import { build, preview } from 'vite';
@@ -42,30 +44,65 @@ interface Session {
 }
 
 const failures: string[] = [];
+const warnings: string[] = [];
 
 function fail(message: string): void {
 	failures.push(message);
 	console.log(`  ✗ ${message}`);
 }
 
-async function nextFrames(page: Page): Promise<void> {
-	await page.evaluate(
-		() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-	);
+/** 고정 프레임 수 대신 안정화 대기 (실기기·시뮬레이터와 같은 스크립트, 설계 7.6). 느린 CI에서도 포커스 복원까지 기다린다 */
+async function settle(page: Page): Promise<void> {
+	const result = await page.evaluate<StableResult>(stableWaitScript());
+	if (!result.stable) console.log(`  (안정화 시간 초과 ${result.waitedMs}ms)`);
 }
 
-async function open(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
+const START_FOCUS = 'thumb-1';
+const SUPPRESS_MOUSE_SCRIPT = `['mousemove','mouseover','mouseout','mouseenter','mouseleave','mousedown','mouseup','click','wheel'].forEach(function (type) {
+	window.addEventListener(type, function (event) { event.stopImmediatePropagation(); }, true);
+});`;
+const OPEN_ATTEMPTS = 3;
+
+async function openOnce(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
 	const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 	const consoleErrors: string[] = [];
 	page.on('console', (msg) => {
 		if (msg.type() === 'error') consoleErrors.push(msg.text());
 	});
 	page.on('pageerror', (err) => consoleErrors.push(err.message));
+	const cdp = await page.context().newCDPSession(page);
+	// 마우스 이벤트를 앱에 전달하지 않는다 (리모컨 5방향 검증, 포인터 숨김 상태).
+	// 헤드리스 Chrome이 화면 표시·레이아웃 변경 때 만드는 합성 마우스 이벤트에 Enact Spotlight가 포인터 모드로 바뀌면
+	// Spotlight.focus()가 무시되어 시작 포커스가 비거나 키가 먹지 않는다 (CI 간헐 불일치의 원인).
+	await page.addInitScript(SUPPRESS_MOUSE_SCRIPT);
+	await page.bringToFront();
+	// tsx(esbuild keepNames)가 page.evaluate 함수 소스에 넣는 __name 호출 대비 (검증 도구 전용)
+	await page.addInitScript('globalThis.__name = globalThis.__name || function (f) { return f; };');
 	await page.goto(`${baseUrl}?focus=${mode}&defects=${defects}`);
 	await page.waitForSelector('[data-testid="screen-home"]');
-	await nextFrames(page);
-	const cdp = await page.context().newCDPSession(page);
+	await settle(page);
 	return { page, cdp, consoleErrors };
+}
+
+/**
+ * 시작 상태(홈, thumb-1 포커스)로 앱을 연다. 시작 포커스가 맞지 않으면 최대 OPEN_ATTEMPTS번 다시 열고,
+ * 다시 연 사실은 경고로 남긴다 (안전장치. 원인이던 합성 마우스 이벤트는 위에서 막는다).
+ * 결함 검증은 "같은 시작 상태에서 키를 눌렀을 때"를 비교하는 것이므로 시작 상태부터 맞춘다.
+ */
+async function open(browser: Browser, baseUrl: string, mode: Mode, defects: string): Promise<Session> {
+	let session = await openOnce(browser, baseUrl, mode, defects);
+	for (let attempt = 2; attempt <= OPEN_ATTEMPTS; attempt++) {
+		const start = await observe(session.page, mode, 'app');
+		if (start.focused === START_FOCUS) return session;
+		const message = `${mode} defects=${defects}: 시작 포커스 ${start.focused ?? '없음'} → 다시 엶 (${attempt}/${OPEN_ATTEMPTS})`;
+		warnings.push(message);
+		console.log(`  ⚠ ${message}`);
+		if (process.env['GITHUB_ACTIONS'] === 'true')
+			console.log(`::warning title=sample:verify 시작 상태::${message}`);
+		await session.page.close();
+		session = await openOnce(browser, baseUrl, mode, defects);
+	}
+	return session;
 }
 
 async function press(session: Session, key: RemoteKey): Promise<void> {
@@ -73,7 +110,7 @@ async function press(session: Session, key: RemoteKey): Promise<void> {
 	const base = { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, key: name };
 	await session.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
 	await session.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
-	await nextFrames(session.page);
+	await settle(session.page);
 }
 
 async function observe(page: Page, mode: Mode, target: string): Promise<Observation> {
@@ -111,18 +148,40 @@ async function observe(page: Page, mode: Mode, target: string): Promise<Observat
 	);
 }
 
+interface RunResult {
+	observation: Observation;
+	/** 키마다 포커스 위치 (불일치 진단용) */
+	trace: string;
+}
+
 async function run(
 	browser: Browser,
 	baseUrl: string,
 	mode: Mode,
 	defect: DefectSpec,
 	defects: string
-): Promise<Observation> {
+): Promise<RunResult> {
 	const session = await open(browser, baseUrl, mode, defects);
-	for (const key of defect.reproKeys) await press(session, key);
-	const result = await observe(session.page, mode, defect.target);
+	const steps: string[] = [`START→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`];
+	for (const key of defect.reproKeys) {
+		await press(session, key);
+		steps.push(`${key}→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`);
+	}
+	const observation = await observe(session.page, mode, defect.target);
 	await session.page.close();
-	return result;
+	return { observation, trace: steps.join(' ') };
+}
+
+function check(mode: Mode, defect: DefectSpec, baseline: Observation, withDefect: Observation): string[] {
+	const problems: string[] = [];
+	if (baseline.focused === null) problems.push(`${mode} ${defect.id}: 결함이 없는데 포커스가 없음`);
+	if (defect.baselineFocus !== undefined && baseline.focused !== defect.baselineFocus) {
+		problems.push(`${mode} ${defect.id}: 결함 없을 때 포커스 ${baseline.focused}, 기대 ${defect.baselineFocus}`);
+	}
+	if (JSON.stringify(baseline) === JSON.stringify(withDefect)) {
+		problems.push(`${mode} ${defect.id}: 결함을 켜도 관찰 결과가 같음 (재현 안 됨)`);
+	}
+	return problems;
 }
 
 async function main(): Promise<void> {
@@ -151,18 +210,33 @@ async function main(): Promise<void> {
 			await all.page.close();
 
 			for (const defect of file.defects) {
-				const baseline = await run(browser, baseUrl, mode, defect, 'none');
-				const withDefect = await run(browser, baseUrl, mode, defect, defect.id);
-				const before = failures.length;
-				if (baseline.focused === null) fail(`${mode} ${defect.id}: 결함이 없는데 포커스가 없음`);
-				if (defect.baselineFocus !== undefined && baseline.focused !== defect.baselineFocus) {
-					fail(`${mode} ${defect.id}: 결함 없을 때 포커스 ${baseline.focused}, 기대 ${defect.baselineFocus}`);
-				}
-				if (JSON.stringify(baseline) === JSON.stringify(withDefect)) {
-					fail(`${mode} ${defect.id}: 결함을 켜도 관찰 결과가 같음 (재현 안 됨)`);
-				}
-				if (failures.length === before) {
+				const attempt = async () => {
+					const baseline = await run(browser, baseUrl, mode, defect, 'none');
+					const withDefect = await run(browser, baseUrl, mode, defect, defect.id);
+					return {
+						baseline,
+						withDefect,
+						problems: check(mode, defect, baseline.observation, withDefect.observation)
+					};
+				};
+				const first = await attempt();
+				if (first.problems.length === 0) {
 					console.log(`  ✓ ${defect.id} ${defect.summary}`);
+					continue;
+				}
+				// 한 번 더 확인한다. 다시 맞으면 정답 목록 문제가 아니라 실행 환경의 타이밍 문제로 보고 경고만 남긴다.
+				const second = await attempt();
+				const detail = `기준 [${first.baseline.trace}] / 결함 [${first.withDefect.trace}]`;
+				if (second.problems.length === 0) {
+					const message = `${mode} ${defect.id}: 첫 시도 불일치, 재시도 통과 — ${first.problems.join('; ')} — ${detail}`;
+					warnings.push(message);
+					console.log(`  ⚠ ${message}`);
+					if (process.env['GITHUB_ACTIONS'] === 'true')
+						console.log(`::warning title=sample:verify 불안정::${message}`);
+				} else {
+					for (const problem of second.problems) fail(problem);
+					console.log(`    첫 시도: ${detail}`);
+					console.log(`    재시도: 기준 [${second.baseline.trace}] / 결함 [${second.withDefect.trace}]`);
 				}
 			}
 		}
@@ -175,6 +249,7 @@ async function main(): Promise<void> {
 		console.log(`\n실패 ${failures.length}건`);
 		process.exit(1);
 	}
+	if (warnings.length > 0) console.log(`\n경고 ${warnings.length}건 (재시도 통과, 위 추적 참고)`);
 	console.log('\n모든 정답 결함이 두 포커스 방식에서 재현됩니다.');
 }
 

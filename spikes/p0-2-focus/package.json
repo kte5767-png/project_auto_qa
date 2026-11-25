@@ -10,8 +10,10 @@
 	},
 	"dependencies": {
 		"@auto-qa/browser": "workspace:*",
+		"@auto-qa/core": "workspace:*",
 		"@auto-qa/focus": "workspace:*",
-		"playwright-core": "^1.65.1",
+		"@auto-qa/sample-tv-app": "workspace:*",
+		"@auto-qa/spike-shared": "workspace:*",
 		"vite": "^8.3.8"
 	},
 	"devDependencies": {

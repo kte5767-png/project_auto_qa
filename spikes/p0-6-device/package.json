@@ -1,0 +1,25 @@
+{
+	"name": "@auto-qa/spike-p0-6-device",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-6 실기기(webOS) 연결 스파이크: ares·SSAP·Inspector 연결 진단, 키 입력, 포커스 판별 20회, 캡처, 개발자 모드 시간",
+	"scripts": {
+		"start": "tsx run.ts",
+		"fake-tv": "tsx fake-tv.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/browser": "workspace:*",
+		"@auto-qa/core": "workspace:*",
+		"@auto-qa/device-webos": "workspace:*",
+		"@auto-qa/focus": "workspace:*",
+		"@auto-qa/sample-tv-app": "workspace:*",
+		"@auto-qa/spike-shared": "workspace:*",
+		"ws": "^8.18.3"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.18.1",
+		"tsx": "^4.23.15"
+	}
+}

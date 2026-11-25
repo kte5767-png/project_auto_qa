@@ -1,4 +1,5 @@
-import type { Page } from 'playwright-core';
+import { pageExpression } from '@auto-qa/core';
+import type { ScriptRunner } from '@auto-qa/core';
 import type { FocusState } from './types';
 
 export interface CollectOptions {
@@ -29,7 +30,8 @@ export const DEFAULT_COLLECT_OPTIONS: CollectOptions = {
 };
 
 /**
- * 브라우저 안에서 실행되는 수집 함수. page.evaluate로 직렬화되므로 바깥 변수·import를 쓰면 안 된다.
+ * 페이지 안에서 실행되는 수집 함수. 소스가 그대로 직렬화되므로 바깥 변수·import를 쓰면 안 된다.
+ * 실기기 구형 엔진(webOS 5.x, Chromium 68)에서도 돌도록 ES2017 문법만 쓴다 (`?.`·`??` 금지).
  */
 function collectInPage(opts: CollectOptions): FocusState {
 	const pathOf = (el: Element): string => {
@@ -58,7 +60,7 @@ function collectInPage(opts: CollectOptions): FocusState {
 			classes: Array.from(el.classList),
 			spotlightId: el.getAttribute('data-spotlight-id'),
 			rect: [round(r.x), round(r.y), round(r.width), round(r.height)] as [number, number, number, number],
-			text: (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40)
+			text: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40)
 		};
 	};
 	const pseudo = (el: Element, which: '::after' | '::before'): string => {
@@ -121,7 +123,7 @@ function collectInPage(opts: CollectOptions): FocusState {
 		if (holders.length > opts.maxClassHolders) continue;
 		classHolders[token] = holders.map((el) => {
 			const info = infoOf(el);
-			elements[info.path] ??= info;
+			if (!Object.prototype.hasOwnProperty.call(elements, info.path)) elements[info.path] = info;
 			return info.path;
 		});
 	}
@@ -136,9 +138,12 @@ function collectInPage(opts: CollectOptions): FocusState {
 	};
 }
 
-/** 현재 페이지의 포커스 관련 상태를 수집한다 */
-export async function collectFocusState(page: Page, options: Partial<CollectOptions> = {}): Promise<FocusState> {
-	// tsx·esbuild의 keepNames가 함수 소스에 넣는 __name 호출이 브라우저에서 깨지지 않도록 대비
-	await page.evaluate('globalThis.__name ??= (fn) => fn');
-	return page.evaluate(collectInPage, { ...DEFAULT_COLLECT_OPTIONS, ...options });
+/** 포커스 상태 수집 스크립트(JS 식). 어떤 드라이버로든 평가할 수 있다. */
+export function collectFocusScript(options: Partial<CollectOptions> = {}): string {
+	return pageExpression(collectInPage, { ...DEFAULT_COLLECT_OPTIONS, ...options });
+}
+
+/** 현재 화면의 포커스 관련 상태를 수집한다 (실기기·시뮬레이터 공통) */
+export function collectFocusState(runner: ScriptRunner, options: Partial<CollectOptions> = {}): Promise<FocusState> {
+	return runner.evaluate<FocusState>(collectFocusScript(options));
 }
