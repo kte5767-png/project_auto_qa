@@ -1,4 +1,5 @@
 import { normalizeFrame } from '@auto-qa/figma';
+import { node, solid } from '@auto-qa/figma/testing';
 import { describe, expect, it } from 'vitest';
 import { compareVersions, normalizeLabel, parseDescription, parseScreenTitle, parseVersions } from './describe';
 import { extractSpecScreen, findMarkers, findMockup } from './extract';
@@ -58,6 +59,29 @@ describe('findMarkers / findMockup', () => {
 
 	it('화면 비율의 가장 큰 상자를 목업으로 본다', () => {
 		expect(findMockup(frame)?.name).toBe('Rectangle 944');
+	});
+
+	it('아래로 스크롤하는 화면은 세로로 긴 목업으로 그린다 → 화면보다 긴 내용 높이로 환산', () => {
+		const page = sampleSpecPage();
+		const mock = page.node.children.find((n) => n.name === 'Rectangle 944');
+		if (mock?.box == null || mock.renderBox == null) throw new Error('목업 없음');
+		mock.box = { ...mock.box, height: 900 };
+		mock.renderBox = { ...mock.renderBox, height: 900 };
+		const tall = normalizeFrame(page);
+		expect(findMockup(tall)?.name).toBe('Rectangle 944');
+		const s = extractSpecScreen(tall);
+		expect(s.mockup).toMatchObject({ scale: 1.6, scroll: true, contentHeight: 1440 });
+		expect(spec.mockup).toMatchObject({ scroll: false, contentHeight: 1080 });
+
+		// 화면 비율과 같은 목업이 따로 있으면 그쪽을 먼저 쓴다
+		page.node.children.push(
+			node(
+				'RECTANGLE',
+				{ x: 2050, y: 1470, width: 800, height: 450 },
+				{ name: 'exact', fills: [solid(0.3, 0.3, 0.3)] }
+			)
+		);
+		expect(findMockup(normalizeFrame(page))?.name).toBe('exact');
 	});
 });
 
