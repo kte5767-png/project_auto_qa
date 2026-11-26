@@ -15,7 +15,8 @@ import type { CalloutLink, MergedSpecScreen, SpecGuiLink, SpecScreen } from '@au
  *
  * 정답 파일 형식:
  * { "pairs": { "<화면 ID>": "<GUI 프레임 이름>" | null },
- *   "callouts": { "<화면 ID>#<번호>": ["<GUI 요소 id>", …] | null } }   // 목록 중 하나면 정답, null은 "GUI에 없음"이 정답
+ *   "callouts": { "<화면 ID>#<번호>": ["<GUI 요소 id>", …] | null },   // 목록 중 하나면 정답, null은 "GUI에 없음"이 정답
+ *   "focus": { "<GUI 프레임 이름>": ["<포커스 요소 id>", …] } }        // 선택: GUI 포커스 추정 정답
  */
 
 export interface FrameSource {
@@ -26,6 +27,25 @@ export interface FrameSource {
 export interface Truth {
 	pairs: Record<string, string | null>;
 	callouts: Record<string, string[] | null>;
+	focus?: Record<string, string[]>;
+}
+
+/** GUI 포커스 추정 정답 대비 (확인 필요 표시도 센다) */
+export function measureFocus(
+	frames: readonly FrameSource[],
+	truth: Truth
+): { correct: number; total: number; flagged: number; wrong: string[] } {
+	const out = { correct: 0, total: 0, flagged: 0, wrong: [] as string[] };
+	for (const f of frames) {
+		const accepted = truth.focus?.[f.analysis.frame.name];
+		if (f.analysis.kind !== 'gui' || accepted === undefined) continue;
+		const p = f.analysis.focus.primary;
+		out.total++;
+		if (f.analysis.focus.ambiguous) out.flagged++;
+		if (p !== null && accepted.includes(p.memberId)) out.correct++;
+		else out.wrong.push(`${f.analysis.frame.name}: 결과 ${p === null ? '없음' : `${p.memberId} (${p.source})`}`);
+	}
+	return out;
 }
 
 interface PartLink {
