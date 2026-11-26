@@ -1,0 +1,18 @@
+{
+	"name": "@auto-qa/spike-p0-8-judge",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-8 판정 규칙 스파이크: 실제 TC 기대 결과를 조건으로 나누고 판정 방법(코드·AI·확인 불가)을 정한 결과와 정확도 (D-037)",
+	"scripts": {
+		"start": "tsx run.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/judge": "workspace:*",
+		"@auto-qa/tc": "workspace:*"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}
