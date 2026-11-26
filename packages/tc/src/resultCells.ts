@@ -4,7 +4,7 @@ import type { CellRef } from './types';
 /**
  * 판정 결과를 TC 양식 그대로 쓰기 위한 순수 함수 (D-040).
  * - 결과 열(P/F)에는 그 칸의 드롭다운(데이터 유효성 목록) 값을 쓴다 (예: Passed / Failed)
- * - 이유는 이슈 설명 열(예: Issue Detail)에 쓴다. 확인 필요는 Passed + 이유 앞에 표시
+ * - 이유는 이슈 설명 열(예: Issue Detail)에 쓴다. Fail은 이유, 확인 필요는 Passed + 이유 앞에 표시, Pass는 비움
  * - 화면으로 확인한 조건이 없는 단계·실행하지 않은 단계는 쓰지 않는다
  */
 
@@ -109,7 +109,7 @@ export interface StepResult {
 	/** 결과 칸 (TC 정규화의 resultCell) */
 	resultCell: CellRef;
 	outcome: StepOutcome;
-	/** 판정 설명. Pass는 확인하지 않은 조건만 남긴다 */
+	/** 판정 설명 (Pass는 passNotes일 때만 확인하지 않은 조건을 쓴다) */
 	reason: string;
 	/** 화면으로 확인한 조건 수. 0이면 쓰지 않는다 */
 	checked: number;
@@ -120,11 +120,17 @@ export interface ResultCellOptions {
 	reviewTag: string;
 	/** 이 줄로 시작하는 설명은 이유 칸에 쓰지 않는다 (Pass의 "모두 통과" 요약 등) */
 	dropLines: readonly RegExp[];
+	/**
+	 * Pass에도 이유 칸에 남은 설명(확인하지 않은 조건)을 쓸지. 기본 false — 고객이 볼 때 이슈가 없으면
+	 * 이유 칸은 비운다(사용자 결정 2026-11-27, D-040). 확인하지 않은 조건은 리포트에 남는다
+	 */
+	passNotes: boolean;
 }
 
 export const DEFAULT_RESULT_CELL_OPTIONS: ResultCellOptions = {
 	reviewTag: '[확인 필요]',
-	dropLines: [/^화면으로 확인한 조건 \d+개 모두 통과$/]
+	dropLines: [/^화면으로 확인한 조건 \d+개 모두 통과$/],
+	passNotes: false
 };
 
 export interface ResultCellWrite {
@@ -165,6 +171,7 @@ export function resultCellWrites(
 			.map((l) => l.trim())
 			.filter((l) => l !== '' && !options.dropLines.some((p) => p.test(l)));
 		if (review) lines.unshift(options.reviewTag);
+		if (s.outcome === 'pass' && !options.passNotes) continue;
 		if (lines.length === 0 || issueColumn === null) continue;
 		const address = `${issueColumn}${s.resultCell.row}`;
 		plan.writes.push({
