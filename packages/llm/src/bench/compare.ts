@@ -89,6 +89,14 @@ const sameModel = (a: string, b: string): boolean => a === b || a === `${b}:late
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+function seconds(ms: number | null): string {
+	return ms === null ? '?초' : `${(ms / 1000).toFixed(1)}초`;
+}
+
+function gib(bytes: number): string {
+	return `${(bytes / 1024 ** 3).toFixed(1)}GB`;
+}
+
 export async function compareModels(
 	client: LlmClient,
 	models: readonly string[],
@@ -128,6 +136,7 @@ export async function compareModels(
 			const vision = run.capabilities.includes('vision');
 
 			// 로드 시간: 내렸다가 짧은 요청으로 올린다
+			onProgress({ model, done: 0, total: 0, note: '모델 불러오는 중 — CPU에서는 수십 초 걸릴 수 있음' });
 			await client.unload(model).catch(() => undefined);
 			const warm = await client.chat({
 				model,
@@ -147,6 +156,12 @@ export async function compareModels(
 				return true;
 			});
 			const total = usable.length * options.runs;
+			onProgress({
+				model,
+				done: 0,
+				total,
+				note: `불러옴 ${seconds(run.loadMs)}${run.memory === null ? '' : `, 메모리 ${gib(run.memory.sizeBytes)} (GPU ${gib(run.memory.vramBytes)})`} — 첫 결과까지 1분 넘게 걸릴 수 있음`
+			});
 			let done = 0;
 			for (const lc of usable) {
 				for (let r = 1; r <= options.runs; r++) {

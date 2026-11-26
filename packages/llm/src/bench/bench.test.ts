@@ -136,6 +136,8 @@ describe('compareModels', () => {
 		]);
 		expect(result.runs[2]?.reason).toBe('설치되지 않음 — ollama pull none:1b');
 		expect(events).toContain('vision:4b 6/6');
+		expect(events).toContain('vision:4b 0/0 모델 불러오는 중 — CPU에서는 수십 초 걸릴 수 있음');
+		expect(events.some((e) => /^vision:4b 0\/6 불러옴 \d+\.\d초, 메모리 /.test(e))).toBe(true);
 		expect(events).toContain('none:1b 0/0 설치되지 않음 — ollama pull none:1b');
 
 		// 생각 모드는 지원하는 모델에만 false로 보낸다
