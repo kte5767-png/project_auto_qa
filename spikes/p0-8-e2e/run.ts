@@ -5,11 +5,14 @@
  *
  *   pnpm spike:e2e spikes/p0-8-e2e/scenario.sample.json --url http://localhost:5173
  *   pnpm spike:e2e spikes/p0-8-e2e/scenario.local.json --spec spikes/p0-8-e2e/spec --headed
+ *
+ * --headed: 창을 띄워 진행을 본다. 1920×1080 화면이 모니터에 다 들어오게 창 배율을 맞추고(--scale),
+ *   사람이 따라볼 수 있게 키마다 잠깐 멈춘다(--slow, 기본 800ms). 멈춤은 보기용이며 판정은 안정화 대기 후 관찰로 한다.
  */
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
+import { BrowserDriver, fitWindowScale, launchBrowser, probeScreen } from '@auto-qa/browser';
 import type { Driver, RemoteKey } from '@auto-qa/core';
 import { analyzeExport, parseExport } from '@auto-qa/figma';
 import type { NormalizedFrame } from '@auto-qa/figma';
@@ -37,6 +40,10 @@ const { values, positionals } = parseArgs({
 		url: { type: 'string' },
 		spec: { type: 'string', multiple: true, default: [] },
 		headed: { type: 'boolean', default: false },
+		/** 키마다 멈추는 시간 (ms, 보기용). 기본: --headed면 800, 아니면 0 */
+		slow: { type: 'string' },
+		/** --headed 창 배율. auto(기본) = 모니터에 1920×1080이 다 보이게 */
+		scale: { type: 'string', default: 'auto' },
 		out: { type: 'string', default: join(import.meta.dirname, 'out') }
 	}
 });
@@ -108,7 +115,9 @@ class Session {
 	constructor(
 		readonly driver: Driver,
 		readonly scenario: Scenario,
-		readonly timing: Timing
+		readonly timing: Timing,
+		/** 키마다 사람이 볼 수 있게 멈추는 시간 (판정과 무관) */
+		readonly pauseMs: number
 	) {
 		this.targets = Object.entries(scenario.elements).map(([name, e]) => ({
 			name,
@@ -129,7 +138,9 @@ class Session {
 	async press(key: RemoteKey): Promise<{ obs: Observation; stable: boolean }> {
 		await this.driver.pressKey(key);
 		const s = await this.driver.waitForStable();
-		return { obs: await this.observe(), stable: s.stable };
+		const obs = await this.observe();
+		if (this.pauseMs > 0) await new Promise((r) => setTimeout(r, this.pauseMs));
+		return { obs, stable: s.stable };
 	}
 
 	/** 조건이 맞을 때까지 확인 (고정 sleep 대신 조건 대기) */
@@ -159,24 +170,31 @@ function focusText(obs: Observation): string {
 	return `${f.tag}${f.spotlightId === null ? '' : `#${f.spotlightId}`} "${f.text.slice(0, 30)}"`;
 }
 
+function record(trail: Trail[], t: Trail, indent = '  진입 '): void {
+	trail.push(t);
+	console.log(
+		`${indent}${t.key === null ? '(대기)' : KEY_LABEL[t.key]} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`
+	);
+}
+
 async function runEntry(session: Session, entry: readonly EntryStep[], trail: Trail[]): Promise<string | null> {
 	for (const step of entry) {
 		if ('waitFocus' in step) {
 			const obs = await session.until((o) => o.focus !== null, step.timeoutMs ?? session.timing.readyTimeoutMs);
 			if (obs === null) return '앱에 포커스가 생기지 않음 (앱이 떴는지, 로딩·팝업 확인)';
-			trail.push({ key: null, focus: focusText(obs), stable: true });
+			record(trail, { key: null, focus: focusText(obs), stable: true });
 		} else if ('waitFor' in step) {
 			const obs = await session.until(
 				(o) => (target(o, step.waitFor)?.visible ?? 0) > 0,
 				step.timeoutMs ?? session.timing.readyTimeoutMs
 			);
 			if (obs === null) return `"${step.waitFor}"가 보이지 않음`;
-			trail.push({ key: null, focus: focusText(obs), stable: true });
+			record(trail, { key: null, focus: focusText(obs), stable: true });
 		} else {
 			const goal = step.until;
 			if (goal === undefined) {
 				const r = await session.press(step.press);
-				trail.push({ key: step.press, focus: focusText(r.obs), stable: r.stable });
+				record(trail, { key: step.press, focus: focusText(r.obs), stable: r.stable });
 				continue;
 			}
 			const reached = (o: Observation): boolean => target(o, goal)?.hasFocus === true;
@@ -189,7 +207,7 @@ async function runEntry(session: Session, entry: readonly EntryStep[], trail: Tr
 			] as const) {
 				for (let i = 0; i < times && !done; i++) {
 					const r = await session.press(key);
-					trail.push({ key, focus: focusText(r.obs), stable: r.stable });
+					record(trail, { key, focus: focusText(r.obs), stable: r.stable });
 					done = reached(r.obs);
 				}
 				if (done) break;
@@ -438,21 +456,37 @@ async function main(): Promise<void> {
 	const out = join(resolve(cwd, values.out), stamp);
 	await mkdir(out, { recursive: true });
 
-	const browser = await launchBrowser({ headless: !values.headed });
+	let windowScale: number | undefined;
+	if (values.headed) {
+		if (values.scale === 'auto') {
+			const screen = await probeScreen();
+			windowScale = fitWindowScale(screen) ?? undefined;
+			console.log(
+				`창 배율 ${windowScale ?? '그대로'} (모니터 ${screen.availWidth}×${screen.availHeight}, 시스템 배율 ${screen.dpr})`
+			);
+		} else {
+			windowScale = Number(values.scale);
+			if (!(windowScale > 0)) throw new Error(`--scale은 양수 또는 auto: ${values.scale}`);
+		}
+	}
+	const pauseMs = values.slow === undefined ? (values.headed ? 800 : 0) : Number(values.slow);
+	if (!(pauseMs >= 0)) throw new Error(`--slow는 0 이상의 ms: ${String(values.slow)}`);
+
+	const browser = await launchBrowser({ headless: !values.headed, windowScale });
 	const driver = await BrowserDriver.open(browser, url);
-	const session = new Session(driver, scenario, timing);
+	const session = new Session(driver, scenario, timing, pauseMs);
 	const entryTrail: Trail[] = [];
 	const steps: StepReport[] = [];
 	let entryError: string | null;
 	try {
 		console.log(`앱 열기: ${url}`);
 		entryError = await runEntry(session, scenario.entry, entryTrail);
-		for (const t of entryTrail) console.log(`  진입 ${t.key === null ? '(대기)' : KEY_LABEL[t.key]} → ${t.focus}`);
 		await writeFile(join(out, 'entry.png'), await driver.screenshot());
 		if (entryError !== null) console.log(`진입 실패: ${entryError}`);
 		else {
 			let obs = await session.observe();
 			for (const step of scenario.steps) {
+				console.log(`  ${step.id} ${step.title}`);
 				const trail: Trail[] = [{ key: null, focus: focusText(obs), stable: true }];
 				const moves: CheckResult[] = [];
 				const errs: string[] = [...obs.errors];
@@ -461,8 +495,12 @@ async function main(): Promise<void> {
 					const remembered = new Map(session.remembered);
 					const r = await session.press(key);
 					obs = r.obs;
-					trail.push({ key, focus: focusText(obs), stable: r.stable });
-					moves.push(checkSpecMove(scenario, { keyMaps, options }, before, key, obs, remembered));
+					const move = checkSpecMove(scenario, { keyMaps, options }, before, key, obs, remembered);
+					moves.push(move);
+					record(trail, { key, focus: focusText(obs), stable: r.stable }, '    ');
+					if (move.verdict !== null && move.verdict !== 'pass') {
+						console.log(`      [화면설계서 ${VERDICT_LABEL[move.verdict]}] ${move.explanation}`);
+					}
 				}
 				const results = step.checks.flatMap((c) => checkStep(scenario, c, obs, moves));
 				const verdict = aggregateStep(results);
@@ -476,9 +514,7 @@ async function main(): Promise<void> {
 					screenshot: shot,
 					errors: [...new Set(errs.concat(obs.errors))]
 				});
-				console.log(
-					`  ${step.id} ${step.title}: ${VERDICT_LABEL[verdict.verdict]} — ${verdict.explanation.split('\n')[0] ?? ''}`
-				);
+				console.log(`    = ${VERDICT_LABEL[verdict.verdict]} — ${verdict.explanation.split('\n')[0] ?? ''}`);
 			}
 		}
 	} finally {
