@@ -19,7 +19,8 @@ import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
 import type { RemoteKey } from '@auto-qa/core';
-import type { Observation } from '@auto-qa/focus';
+import { nextResetStep, sameFingerprint, takeFingerprint } from '@auto-qa/focus';
+import type { Observation, ScreenFingerprint } from '@auto-qa/focus';
 import {
 	VERDICT_LABEL,
 	aggregateStep,
@@ -54,7 +55,7 @@ import {
 	viewOptions
 } from './common';
 import type { Trail } from './common';
-import { PROFILE_FORMAT, buildRegistry, calloutMark, entryPath, validateProfile } from './profile';
+import { PROFILE_FORMAT, buildRegistry, calloutMark, entryPath, resetConfig, validateProfile } from './profile';
 import type { AppProfile, ElementRegistry } from './profile';
 import { DEFAULT_TIMING } from './scenario';
 import type { Timing } from './scenario';
@@ -139,13 +140,18 @@ interface Ctx {
 interface ScreenSession {
 	screen: string;
 	session: Session;
-	close(): Promise<void>;
 	/** 그 화면에 막 들어왔을 때의 관찰 (진입 시 포커스 확인용) */
 	entryObs: Observation;
 	opened: number;
 }
 
-/** 목표에 가지 못한 이유. again = 앱을 다시 열면 될 수도 있음 (길이 아예 없으면 false) */
+/** 열려 있는 앱: 드라이버 하나를 계속 쓰고, 처음 화면 지문을 기억한다 (D-039) */
+interface AppSession {
+	driver: BrowserDriver;
+	home: ScreenFingerprint;
+}
+
+/** 목표에 못 간 이유. again = 처음 화면부터 다시 가 보면 될 수 있음 */
 interface Miss {
 	reason: string;
 	again: boolean;
@@ -164,39 +170,124 @@ function listPrevKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 
 class Runner {
 	current: ScreenSession | null = null;
+	app: AppSession | null = null;
+	/** 앱을 연 횟수 (처음 + 되돌리기 실패로 다시 연 횟수) */
 	opens = 0;
+	/** 처음 화면으로 키로 되돌린 횟수 */
+	resets = 0;
+	readonly reset: ReturnType<typeof resetConfig>;
 
-	constructor(readonly ctx: Ctx) {}
-
-	async close(): Promise<void> {
-		if (this.current !== null) await this.current.close();
-		this.current = null;
+	constructor(readonly ctx: Ctx) {
+		this.reset = resetConfig(ctx.profile);
 	}
 
-	/** 앱을 새로 열고 그 화면까지 간다 (새 브라우저 컨텍스트라 저장 상태도 새로) */
-	async open(screen: string, trail: Trail[]): Promise<string | null> {
+	async close(): Promise<void> {
+		this.current = null;
+		if (this.app !== null) await this.app.driver.close();
+		this.app = null;
+	}
+
+	/** 앱을 새로 열고(새 브라우저 컨텍스트라 저장 상태도 새로) 준비되면 처음 화면 지문을 기억한다 */
+	private async launch(trail: Trail[]): Promise<string | null> {
 		await this.close();
 		const { ctx } = this;
 		this.opens++;
 		const driver = await BrowserDriver.open(ctx.browser, ctx.url);
+		const probe = new Session(driver, {}, ctx.profile.focusSelector ?? null, ctx.timing, 0);
+		const ready = await probe.until((o) => o.focus !== null, ctx.timing.readyTimeoutMs);
+		if (ready === null) {
+			await driver.close();
+			return '앱에 포커스가 생기지 않음 (앱이 떴는지, 로딩·팝업 확인)';
+		}
+		await driver.waitForStable();
+		const home = await takeFingerprint(driver, this.reset.fingerprint);
+		this.app = { driver, home };
+		const layers = home.layers.length > 0 ? `, 겹친 층 ${home.layers.length}` : '';
+		record(
+			trail,
+			{ key: null, focus: `앱 열기 → 처음 화면 기억 (요소 ${home.items.length}개${layers})`, stable: true },
+			'      '
+		);
+		return null;
+	}
+
+	/**
+	 * 처음 화면으로 키로 되돌린다 (D-039): 지문과 같아질 때까지 BACK, 포커스가 든 팝업은 닫기 키, 포커스 없는 층(토스트)은
+	 * BACK을 누르지 않음, 최상위에 닿은 뒤 GNB 같은 영역에 있으면 그 영역의 나가기 키. OK는 누르지 않는다.
+	 * 안 되면 앱을 다시 연다. 오류 문장 또는 null
+	 */
+	private async resetHome(trail: Trail[]): Promise<string | null> {
+		const app = this.app;
+		if (app === null) return this.launch(trail);
+		const { ctx } = this;
+		const state = { top: 0 };
+		const take = (): Promise<ScreenFingerprint> => takeFingerprint(app.driver, this.reset.fingerprint);
+		for (let i = 0; i <= ctx.timing.maxResetKeys; i++) {
+			let now = await take();
+			let step = nextResetStep(app.home, now, state, this.reset.rules, this.reset.match);
+			if (step.kind === 'wait') {
+				// 토스트가 사라질 때까지 (고정 sleep 대신 조건 확인)
+				const end = Date.now() + ctx.timing.toastWaitMs;
+				while (step.kind === 'wait' && Date.now() < end) {
+					await new Promise((r) => setTimeout(r, ctx.timing.pollMs));
+					now = await take();
+					step = nextResetStep(app.home, now, state, this.reset.rules, this.reset.match);
+				}
+				state.top++;
+				if (step.kind === 'wait') step = { kind: 'relaunch', reason: '포커스 없는 층이 사라지지 않음' };
+			}
+			if (step.kind === 'done') {
+				if (i > 0) {
+					this.resets++;
+					record(trail, { key: null, focus: step.reason, stable: true }, '      처음으로 ');
+				}
+				return null;
+			}
+			if (step.kind === 'relaunch' || i === ctx.timing.maxResetKeys) {
+				const why =
+					step.kind === 'relaunch' ? step.reason : `키 ${ctx.timing.maxResetKeys}번 안에 처음 화면에 못 옴`;
+				record(trail, { key: null, focus: `다시 열기 (${why})`, stable: true }, '      처음으로 ');
+				return this.launch(trail);
+			}
+			if (step.kind !== 'press') continue;
+			await app.driver.pressKey(step.key);
+			const st = await app.driver.waitForStable();
+			// 팝업(종료 팝업)을 닫았거나 BACK에 화면이 그대로면 최상위에 닿은 것
+			const noEffect = step.key === this.reset.rules.backKey && sameFingerprint(now, await take());
+			if (step.closes === 'popup' || noEffect) state.top++;
+			record(
+				trail,
+				{
+					key: step.key,
+					focus: noEffect ? `${step.reason} (반응 없음 → 최상위)` : step.reason,
+					stable: st.stable
+				},
+				'      처음으로 '
+			);
+		}
+		return this.launch(trail);
+	}
+
+	/** 그 화면까지 간다: 앱이 없으면 열고, 있으면 처음 화면으로 되돌린 뒤 진입 경로를 따라간다 (앱을 다시 열지 않음) */
+	async open(screen: string, trail: Trail[]): Promise<string | null> {
+		const { ctx } = this;
+		this.current = null;
+		const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
+		if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
 		const session = new Session(
-			driver,
+			this.app.driver,
 			ctx.registry.forScreen(screen),
 			ctx.profile.focusSelector ?? null,
 			ctx.timing,
 			ctx.pauseMs
 		);
-		const close = (): Promise<void> => driver.close();
 		let error = await runEntry(session, entryPath(ctx.profile, ctx.registry, screen), trail);
 		if (error === null) {
 			const shown = await session.until((o) => this.shown(o, screen), ctx.timing.readyTimeoutMs);
 			if (shown === null) error = `${screen} 화면 표시(detect)가 보이지 않음`;
 		}
-		if (error !== null) {
-			await close();
-			return error;
-		}
-		this.current = { screen, session, close, entryObs: await session.observe(), opened: this.opens };
+		if (error !== null) return error;
+		this.current = { screen, session, entryObs: await session.observe(), opened: this.opens };
 		return null;
 	}
 
@@ -267,9 +358,9 @@ class Runner {
 	async reach(screen: string, no: string, trail: Trail[]): Promise<Miss | null> {
 		const first = await this.tryReach(screen, no, trail);
 		if (first === null || !first.again) return first;
-		record(trail, { key: null, focus: `다시 열기 (${first.reason})`, stable: true }, '      ');
+		record(trail, { key: null, focus: `처음 화면부터 다시 (${first.reason})`, stable: true }, '      ');
 		const error = await this.open(screen, trail);
-		if (error !== null) return { reason: `다시 열기 실패: ${error}`, again: false };
+		if (error !== null) return { reason: `처음 화면부터 다시 가지 못함: ${error}`, again: false };
 		return this.tryReach(screen, no, trail);
 	}
 
@@ -991,7 +1082,7 @@ async function main(): Promise<void> {
 		await runner.close();
 		await browser.close();
 	}
-	console.log(`앱을 연 횟수: ${runner.opens}`);
+	console.log(`앱을 연 횟수: ${runner.opens} · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}`);
 
 	console.log(`\nTC 파일에 결과 쓰기 (${basename(tcPath)}):\n${await writeResults(tcPath, steps, values.overwrite)}`);
 	const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));
