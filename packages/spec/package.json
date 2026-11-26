@@ -1,0 +1,18 @@
+{
+	"name": "@auto-qa/spec",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "UX 화면설계서 구조 추출: 화면 ID·진입 조건·목업 배율·콜아웃(마커↔설명↔대상 위치)·추가 설명·음성 안내·버전 이력 (D-012, D-024)",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/core": "workspace:*",
+		"@auto-qa/figma": "workspace:*"
+	}
+}

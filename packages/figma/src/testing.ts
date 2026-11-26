@@ -17,6 +17,11 @@ export const IMAGE: ExportedPaint = { type: 'IMAGE', visible: true, opacity: 1, 
 
 let counter = 0;
 
+/** 합성 노드 id 번호를 처음부터 다시 매긴다 (같은 입력 → 같은 id) */
+export function resetIds(start = 0): void {
+	counter = start;
+}
+
 export interface NodeOptions {
 	name?: string;
 	visible?: boolean;
