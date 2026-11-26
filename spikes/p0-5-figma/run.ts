@@ -3,7 +3,10 @@ import { basename, extname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { analyzeExport, elementById, isShown, parseExport } from '@auto-qa/figma';
 import type { FigmaExport, FrameAnalysis } from '@auto-qa/figma';
-import { sampleExport, sampleHomeFrame, sampleSpecFrame } from '@auto-qa/figma/testing';
+import { sampleExport, sampleHomeFrame } from '@auto-qa/figma/testing';
+import { extractSpecScreen } from '@auto-qa/spec';
+import type { SpecScreen } from '@auto-qa/spec';
+import { sampleSpecPage } from '@auto-qa/spec/testing';
 
 /**
  * P0-5 Figma 내보내기 스파이크.
@@ -48,7 +51,8 @@ function summary(a: FrameAnalysis) {
 			candidates: a.focus.candidates.map((c) => ({ ...c, memberName: name(c.memberId) })),
 			skipped: a.focus.skipped
 		},
-		anchors: a.anchors
+		anchors: a.anchors,
+		spec: a.kind === 'spec' ? extractSpecScreen(a.frame) : null
 	};
 }
 
@@ -75,6 +79,59 @@ function overlay(a: FrameAnalysis, image: string | null): string {
 	return `<svg viewBox="0 0 ${f.width} ${f.height}" style="width:100%;max-width:960px;border:1px solid #ccc">${bg}${groups}${candidates}${primary}</svg>`;
 }
 
+function specOverlay(a: FrameAnalysis, spec: SpecScreen, image: string | null): string {
+	const f = a.frame;
+	const box = (r: { x: number; y: number; width: number; height: number }, color: string, width: number, dash = '') =>
+		`<rect x="${r.x}" y="${r.y}" width="${r.width}" height="${r.height}" fill="none" stroke="${color}" stroke-width="${width}"${dash === '' ? '' : ` stroke-dasharray="${dash}"`}/>`;
+	const mid = (r: { x: number; y: number; width: number; height: number }): [number, number] => [
+		r.x + r.width / 2,
+		r.y + r.height / 2
+	];
+	const parts: string[] = [];
+	if (spec.mockup !== null) parts.push(box(spec.mockup.rect, '#3b82f6', 4, '16 8'));
+	for (const c of spec.callouts) {
+		if (c.target !== null) parts.push(box(c.target.specRect, '#22c55e', 5));
+		if (c.markerRect !== null) {
+			parts.push(box(c.markerRect, '#ef4444', 4));
+			if (c.target !== null) {
+				const [x1, y1] = mid(c.markerRect);
+				const [x2, y2] = mid(c.target.specRect);
+				parts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#ef4444" stroke-width="3"/>`);
+			}
+		}
+		if (c.descriptionMarkerRect !== null) parts.push(box(c.descriptionMarkerRect, '#a855f7', 4));
+	}
+	const bg =
+		image === null
+			? `<rect width="${f.width}" height="${f.height}" fill="#f4f4f4"/>`
+			: `<image href="data:image/png;base64,${image}" width="${f.width}" height="${f.height}"/>`;
+	return `<svg viewBox="0 0 ${f.width} ${f.height}" style="width:100%;max-width:960px;border:1px solid #ccc">${bg}${parts.join('')}</svg>`;
+}
+
+function renderSpec(a: FrameAnalysis, spec: SpecScreen, image: string | null): string {
+	const keyNames: Record<string, string> = { up: '▲', down: '▼', left: '◀', right: '▶', ok: 'OK', back: 'Back' };
+	const rows = spec.callouts
+		.map((c) => {
+			const t = c.target;
+			const keys = Object.entries(c.description?.keys ?? {})
+				.map(([k, v]) => `${keyNames[k] ?? k} ${esc(v)}`)
+				.join('<br>');
+			return `<tr><td>${esc(c.no)}</td><td>${esc(c.label ?? '(설명 없음)')}</td>
+<td>${t === null ? '-' : `${t.method} (${t.confidence})<br>${esc(t.text?.split('\n')[0] ?? t.name)}`}</td>
+<td>${t === null ? '-' : `${t.screenRect.x}, ${t.screenRect.y}, ${t.screenRect.width}×${t.screenRect.height}`}</td><td>${keys}</td></tr>`;
+		})
+		.join('');
+	return `${specOverlay(a, spec, image)}
+<p class="legend"><span style="color:#3b82f6">■ 목업</span> <span style="color:#ef4444">■ 목업 마커 → 대상</span> <span style="color:#22c55e">■ 대상</span> <span style="color:#a855f7">■ 설명 마커</span></p>
+<h3>화면 ${esc(spec.screenId ?? '?')} ${esc(spec.title ?? '')}${spec.modified ? ' <small>(M)</small>' : ''}</h3>
+<p>상위: ${spec.parents.map((p) => `${esc(p.screenId)} ${esc(p.title)}`).join(', ') || '-'} · 쪽 ${esc(spec.pageNumber ?? '-')} · 목업 배율 ×${spec.mockup?.scale ?? '-'}</p>
+<p>진입 조건: ${spec.entryConditions.map(esc).join(' / ') || '-'}${spec.defaultFocus === null ? '' : ` · <b>Default Focus</b>: ${esc(spec.defaultFocus)}`}</p>
+<table><tr><th>번호</th><th>이름</th><th>대상 (방법·신뢰도)</th><th>화면 좌표</th><th>키 동작</th></tr>${rows}</table>
+<p>버전: ${spec.versions.map((v) => `v${esc(v.version)} ${esc(v.changes.join(' '))}`).join(' / ') || '-'}</p>
+<p>추가 설명: ${spec.notes.map(esc).join(' / ') || '-'} · 음성 안내 ${spec.audioGuidance.length}줄 (보류) · 경계 밖 메모 ${spec.offFrameNotes.length}</p>
+${spec.diagnostics.length > 0 ? `<ul>${spec.diagnostics.map((d) => `<li class="bad">${esc(d)}</li>`).join('')}</ul>` : ''}`;
+}
+
 function renderFrame(a: FrameAnalysis, image: string | null): string {
 	const s = summary(a);
 	const f = a.frame;
@@ -91,7 +148,8 @@ function renderFrame(a: FrameAnalysis, image: string | null): string {
 <h2>${esc(f.name)} <small>(${esc(f.pageName)}, ${f.width}×${f.height})</small></h2>
 <p>종류: <b>${s.kind}</b> — ${esc(s.kindReason)} · 요소 ${s.counts.total} (보임 ${s.counts.shown}, 걸침 ${s.counts.partial}, 경계 밖 ${s.counts.clipped}, 숨김 ${s.counts.hidden})</p>
 ${a.kind === 'gui' ? overlay(a, image) : ''}
-<p class="legend"><span style="color:#ef4444">■ 포커스 추정</span> <span style="color:#f97316">■ 다른 후보</span> <span>점선 = 반복 묶음(색별)</span></p>
+${s.spec === null ? '' : renderSpec(a, s.spec, image)}
+${a.kind !== 'gui' ? '' : `<p class="legend"><span style="color:#ef4444">■ 포커스 추정</span> <span style="color:#f97316">■ 다른 후보</span> <span>점선 = 반복 묶음(색별)</span></p>`}
 ${
 	a.kind !== 'gui'
 		? ''
@@ -148,15 +206,20 @@ ${analyses.map((a, i) => renderFrame(a, data.frames[i]?.image?.data ?? null)).jo
 				: p === null
 					? ' 포커스 없음'
 					: ` 포커스 ${elementById(a.frame, p.memberId)?.name ?? p.memberId} (${p.score}${a.focus.ambiguous ? ', 확인 필요' : ''})`;
+		const spec = a.kind === 'spec' ? extractSpecScreen(a.frame) : null;
+		const specText =
+			spec === null
+				? ''
+				: ` 화면 ${spec.screenId ?? '?'} 콜아웃 ${spec.callouts.length} (대상 ${spec.callouts.filter((c) => c.target !== null).length}, 설명 ${spec.callouts.filter((c) => c.description !== null).length}) 진단 ${spec.diagnostics.length}`;
 		console.log(
-			`  ${a.kind.padEnd(7)} ${a.frame.name} — 요소 ${a.counts.total}, 묶음 ${a.groups.length}, 앵커 ${a.anchors.length}${focus}`
+			`  ${a.kind.padEnd(7)} ${a.frame.name} — 요소 ${a.counts.total}, 묶음 ${a.groups.length}, 앵커 ${a.anchors.length}${focus}${specText}`
 		);
 	}
 	console.log(`  → ${join(out, 'report.html')}`);
 }
 
 if (values.sample) {
-	const data = sampleExport([sampleHomeFrame(), sampleSpecFrame()]);
+	const data = sampleExport([sampleHomeFrame(), sampleSpecPage()]);
 	await mkdir(resolve(values.out), { recursive: true });
 	await writeFile(join(resolve(values.out), 'sample-export.json'), JSON.stringify(data));
 	await run('sample', data);

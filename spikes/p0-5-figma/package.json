@@ -9,7 +9,8 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
-		"@auto-qa/figma": "workspace:*"
+		"@auto-qa/figma": "workspace:*",
+		"@auto-qa/spec": "workspace:*"
 	},
 	"devDependencies": {
 		"tsx": "^4.23.15"
