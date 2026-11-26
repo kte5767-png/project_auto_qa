@@ -21,6 +21,7 @@
 		"spike:device": "pnpm --filter @auto-qa/spike-p0-6-device start",
 		"spike:tc": "pnpm --filter @auto-qa/spike-p0-7-tc start",
 		"spike:figma": "pnpm --filter @auto-qa/spike-p0-5-figma start",
+		"spike:llm": "pnpm --filter @auto-qa/spike-p0-8-llm start",
 		"figma:build": "pnpm --filter @auto-qa/figma-plugin build",
 		"check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
 		"db:up": "docker compose up -d",
