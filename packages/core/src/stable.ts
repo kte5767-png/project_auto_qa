@@ -19,7 +19,25 @@ function stableInPage(opts: StableOptions): Promise<StableResult> {
 		const bump = (): void => {
 			lastChange = performance.now();
 		};
-		const observer = new MutationObserver(bump);
+		const ignored = (node: Node | null): boolean => {
+			if (opts.ignore === '' || node === null) return false;
+			const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
+			if (el === null) return false;
+			try {
+				return el.closest(opts.ignore) !== null;
+			} catch (e) {
+				// ES2017: catch 바인딩을 생략할 수 없다 (선택자 오류면 무시하지 않음)
+				return e === undefined;
+			}
+		};
+		const observer = new MutationObserver((records) => {
+			for (let i = 0; i < records.length; i++) {
+				if (!ignored((records[i] as MutationRecord).target)) {
+					bump();
+					return;
+				}
+			}
+		});
 		observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
 		const events = ['transitionend', 'animationstart', 'animationend'];
 		if (!hasAnimations) {
@@ -42,7 +60,8 @@ function stableInPage(opts: StableOptions): Promise<StableResult> {
 				const running = doc.getAnimations().some((a) => {
 					const effect = a.effect;
 					const iterations = effect === null ? 1 : effect.getTiming().iterations;
-					return a.playState === 'running' && iterations !== Infinity;
+					const target = effect !== null && 'target' in effect ? (effect as KeyframeEffect).target : null;
+					return a.playState === 'running' && iterations !== Infinity && !ignored(target);
 				});
 				if (running) lastChange = now;
 			}
@@ -63,7 +82,8 @@ export function stableWaitScript(options: Partial<StableOptions> = {}): string {
 	const merged: StableOptions = {
 		quietMs: options.quietMs ?? DEFAULT_STABLE_OPTIONS.quietMs,
 		timeoutMs: options.timeoutMs ?? DEFAULT_STABLE_OPTIONS.timeoutMs,
-		legacyQuietMs: options.legacyQuietMs ?? DEFAULT_STABLE_OPTIONS.legacyQuietMs
+		legacyQuietMs: options.legacyQuietMs ?? DEFAULT_STABLE_OPTIONS.legacyQuietMs,
+		ignore: options.ignore ?? DEFAULT_STABLE_OPTIONS.ignore
 	};
 	return pageExpression(stableInPage, merged);
 }
