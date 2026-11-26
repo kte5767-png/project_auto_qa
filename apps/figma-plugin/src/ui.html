@@ -57,7 +57,27 @@
 			</select></label
 		>
 		<label><input id="images" type="checkbox" checked /> 프레임 PNG 포함</label>
+		<label
+			>한 파일에
+			<select id="batch">
+				<option value="10">10개씩</option>
+				<option value="20" selected>20개씩</option>
+				<option value="50">50개씩</option>
+				<option value="0">전부 한 파일</option>
+			</select></label
+		>
+		<label>시작 번호 <input id="start" type="number" min="1" value="1" /></label>
+		<label
+			><input id="auto" type="checkbox" checked /> 나눈 파일을 이어서 자동 저장 (첫 파일만 저장되면 끄고 파일마다
+			눌러 저장)</label
+		>
+		<p class="note">
+			프레임이 많으면 나눠 저장합니다. 화면설계서는 PNG 없이도 됩니다. 멈추면 상태 줄의 시작 번호로 이어서
+			내보내세요.
+		</p>
 		<button id="export" disabled>JSON으로 내보내기</button>
+		<button id="cancel" disabled>멈추기</button>
+		<button id="save-part" hidden>파일 저장</button>
 		<p id="status" class="note">파일은 이 PC에만 저장됩니다. 외부로 보내지 않습니다.</p>
 		<!-- SCRIPT -->
 	</body>
