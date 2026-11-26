@@ -4,6 +4,7 @@ import { parse } from 'acorn';
 import { describe, expect, it } from 'vitest';
 import {
 	DEFAULT_RESET_RULES,
+	addedItems,
 	fingerprintScript,
 	itemSimilarity,
 	matchHome,
@@ -177,5 +178,17 @@ describe('nextResetStep (처음 화면으로 되돌리기, D-039)', () => {
 		expect(nextResetStep(HOME, popup, { top: 0 }, { ...rules, closePopupKey: 'OK' })).toMatchObject({
 			kind: 'relaunch'
 		});
+	});
+});
+
+describe('addedItems', () => {
+	it('처음보다 새로 생긴 요소만 (같은 이름은 개수로)', () => {
+		const base = ['searchInput', 'chip', 'chip', 'card'];
+		const now = ['searchInput', 'recent-search-a', 'chip', 'chip', 'chip', 'card'];
+		expect(addedItems(base, now)).toEqual(['recent-search-a', 'chip']);
+	});
+
+	it('없어진 요소는 새로 생긴 것이 아니다', () => {
+		expect(addedItems(['a', 'b'], ['a'])).toEqual([]);
 	});
 });

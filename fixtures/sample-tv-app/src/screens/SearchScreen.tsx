@@ -16,12 +16,15 @@ const ESCAPE_KEY_CODE = 27;
 
 /**
  * 화면설계서 4.1(Search Field - 최초 진입 시) 와이어프레임 배치를 TV 좌표(÷0.625)로 옮긴 화면.
+ * 검색한 적이 있으면 최근 검색어 줄이 맨 위에 생긴다(4.3) — 앞 단계가 남긴 상태가 화면을 바꾸는 예.
  * 가상 키보드(VKB)는 플랫폼 기능이라 그리지 않는다 — 검색창에서 OK를 누르면 입력란이 편집 상태가 되고
  * (TV에서는 VKB가 열림), 글자는 플랫폼 키보드나 입력 이벤트로 들어온다. Enter = 검색, Back = 편집 끝.
  * 검색하면 결과(4.5) 또는 결과 없음 + 추천 키워드(4.6)를 보여 준다. 앞뒤 공백은 지운다(4.8).
  */
 export function SearchScreen({ onBack }: SearchScreenProps) {
-	const { config, layout, focus, setBackHandler } = useApp();
+	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch } = useApp();
+	// 최근 검색어가 있으면 그 줄이 맨 위에 생기고 아래 섹션이 내려간다 (화면설계서 4.3)
+	const shift = recentSearches.length > 0 ? 162 : 0;
 	const { search } = layout;
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [editing, setEditing] = useState(false);
@@ -48,14 +51,18 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 		pendingFocus.current = 'search-field';
 	}, []);
 
-	const submit = useCallback((raw: string) => {
-		const q = raw.trim();
-		inputRef.current?.blur();
-		setEditing(false);
-		setQuery(q);
-		setSubmitted(q === '' ? null : q);
-		pendingFocus.current = q !== '' && searchCards(q).length > 0 ? 'search-result-1' : 'search-field';
-	}, []);
+	const submit = useCallback(
+		(raw: string) => {
+			const q = raw.trim();
+			inputRef.current?.blur();
+			setEditing(false);
+			setQuery(q);
+			setSubmitted(q === '' ? null : q);
+			if (q !== '') addRecentSearch(q);
+			pendingFocus.current = q !== '' && searchCards(q).length > 0 ? 'search-result-1' : 'search-field';
+		},
+		[addRecentSearch]
+	);
 
 	// 결과를 보는 중의 Back은 검색 첫 화면으로 (이전 화면 = 4.2, Historical Back)
 	useEffect(() => {
@@ -124,7 +131,26 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 
 			{submitted === null && (
 				<>
-					<h2 className="search-section-title" style={{ top: 178 }}>
+					{recentSearches.length > 0 && (
+						<>
+							<h2 className="search-section-title" style={{ top: 178 }}>
+								Recent Searches
+							</h2>
+							{recentSearches.map((query, i) => (
+								<Focusable
+									key={query}
+									id={`search-recent-${i + 1}`}
+									testId={`search-recent-${i + 1}`}
+									className="search-recent"
+									style={{ left: 210 + i * 333, top: 246, width: 320, height: 66 }}
+									onSelect={() => submit(query)}
+								>
+									{query}
+								</Focusable>
+							))}
+						</>
+					)}
+					<h2 className="search-section-title" style={{ top: 178 + shift }}>
 						Recommended Keywords
 					</h2>
 					{SEARCH_KEYWORDS.map((keyword, i) => (
@@ -133,14 +159,14 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 							id={`search-chip-${i + 1}`}
 							testId={`search-chip-${i + 1}`}
 							className="search-chip"
-							style={{ left: 210 + i * 333, top: 246, width: 320, height: 66 }}
+							style={{ left: 210 + i * 333, top: 246 + shift, width: 320, height: 66 }}
 							onSelect={() => submit(keyword)}
 						>
 							{keyword}
 						</Focusable>
 					))}
 
-					<h2 className="search-section-title" style={{ top: 403 }}>
+					<h2 className="search-section-title" style={{ top: 403 + shift }}>
 						Travel Now
 					</h2>
 					{SEARCH_CARDS.map((card, i) => (
@@ -151,7 +177,7 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 							className="search-card"
 							style={{
 								left: 210 + i * 400,
-								top: 467,
+								top: 467 + shift,
 								width: 388,
 								height: 216,
 								background: gradientOf(card.hue)
