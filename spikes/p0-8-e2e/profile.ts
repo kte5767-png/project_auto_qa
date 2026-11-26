@@ -46,6 +46,8 @@ export interface AppProfile {
 	 * OK는 누르지 않음). 공통 요소의 `exit` 키는 "그 영역에서 나가는 키"로 함께 쓴다 (예: GNB → RIGHT)
 	 */
 	reset?: ResetDef;
+	/** 로딩 표시 선택자 (스피너·스켈레톤). 보이는 동안은 다음 키를 누르지 않는다. 없으면 기본 선택자, ""면 끔 */
+	loading?: string;
 }
 
 export interface ResetDef {

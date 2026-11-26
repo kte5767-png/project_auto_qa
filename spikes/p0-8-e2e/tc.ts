@@ -44,6 +44,7 @@ import {
 } from '@auto-qa/tc';
 import type { ResultWrite, StepResult, TcCase, TcStep } from '@auto-qa/tc';
 import {
+	DEFAULT_LOADING_SELECTOR,
 	Session,
 	checkSpecMove,
 	focusText,
@@ -193,13 +194,13 @@ class Runner {
 		const { ctx } = this;
 		this.opens++;
 		const driver = await BrowserDriver.open(ctx.browser, ctx.url);
-		const probe = new Session(driver, {}, ctx.profile.focusSelector ?? null, ctx.timing, 0);
-		const ready = await probe.until((o) => o.focus !== null, ctx.timing.readyTimeoutMs);
-		if (ready === null) {
+		const probe = this.probe(driver);
+		// 스플래시·스켈레톤이 끝나고 포커스가 자리 잡은 뒤의 화면을 처음 화면으로 기억한다
+		const ready = await probe.settle(ctx.timing.readyTimeoutMs);
+		if (!ready.settled) {
 			await driver.close();
-			return '앱에 포커스가 생기지 않음 (앱이 떴는지, 로딩·팝업 확인)';
+			return '앱이 준비되지 않음 (포커스가 없거나 로딩 표시가 사라지지 않음)';
 		}
-		await driver.waitForStable();
 		const home = await takeFingerprint(driver, this.reset.fingerprint);
 		this.app = { driver, home };
 		const layers = home.layers.length > 0 ? `, 겹친 층 ${home.layers.length}` : '';
@@ -252,6 +253,7 @@ class Runner {
 			if (step.kind !== 'press') continue;
 			await app.driver.pressKey(step.key);
 			const st = await app.driver.waitForStable();
+			await this.probe(app.driver).settle(ctx.timing.readyTimeoutMs);
 			// 팝업(종료 팝업)을 닫았거나 BACK에 화면이 그대로면 최상위에 닿은 것
 			const noEffect = step.key === this.reset.rules.backKey && sameFingerprint(now, await take());
 			if (step.closes === 'popup' || noEffect) state.top++;
@@ -274,13 +276,7 @@ class Runner {
 		this.current = null;
 		const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
 		if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
-		const session = new Session(
-			this.app.driver,
-			ctx.registry.forScreen(screen),
-			ctx.profile.focusSelector ?? null,
-			ctx.timing,
-			ctx.pauseMs
-		);
+		const session = this.newSession(screen);
 		let error = await runEntry(session, entryPath(ctx.profile, ctx.registry, screen), trail);
 		if (error === null) {
 			const shown = await session.until((o) => this.shown(o, screen), ctx.timing.readyTimeoutMs);
@@ -291,9 +287,53 @@ class Runner {
 		return null;
 	}
 
-	/** 이 화면을 쓰고 있으면 그대로, 아니면 새로 연다 */
+	/** 요소 없이 포커스·로딩만 보는 세션 (앱 준비·되돌리기 대기용) */
+	private probe(driver: BrowserDriver): Session {
+		const { ctx } = this;
+		return new Session(
+			driver,
+			{},
+			ctx.profile.focusSelector ?? null,
+			ctx.timing,
+			0,
+			ctx.profile.loading ?? DEFAULT_LOADING_SELECTOR
+		);
+	}
+
+	private newSession(screen: string): Session {
+		const { ctx } = this;
+		if (this.app === null) throw new Error('앱이 열려 있지 않음');
+		return new Session(
+			this.app.driver,
+			ctx.registry.forScreen(screen),
+			ctx.profile.focusSelector ?? null,
+			ctx.timing,
+			ctx.pauseMs,
+			ctx.profile.loading ?? DEFAULT_LOADING_SELECTOR
+		);
+	}
+
+	/**
+	 * 이 화면을 쓰고 있으면 그대로. 같은 패널(detect가 같은 화면, 예: 4.1·4.2 검색 패널)이 이미 떠 있으면
+	 * 처음 화면으로 돌아가지 않고 이어 쓴다(진입 시 관찰은 그 패널에 들어왔을 때의 것). 아니면 처음 화면부터 들어간다
+	 */
 	async ensure(screen: string, trail: Trail[]): Promise<string | null> {
-		return this.current?.screen === screen ? null : this.open(screen, trail);
+		const cur = this.current;
+		if (cur?.screen === screen) return null;
+		if (cur !== null && this.sameDetect(cur.screen, screen)) {
+			const session = this.newSession(screen);
+			const obs = await session.observe();
+			if (this.shown(obs, screen)) {
+				this.current = { screen, session, entryObs: cur.entryObs, opened: cur.opened };
+				record(
+					trail,
+					{ key: null, focus: `${cur.screen}와 같은 화면이 떠 있어 이어서 씀`, stable: true },
+					'      '
+				);
+				return null;
+			}
+		}
+		return this.open(screen, trail);
 	}
 
 	get session(): Session {
