@@ -81,13 +81,72 @@ function cornerRadius(n: Loose, ctx: SerializeContext): ExportedNode['cornerRadi
 	return [num(n.topLeftRadius), num(n.topRightRadius), num(n.bottomRightRadius), num(n.bottomLeftRadius)];
 }
 
-function text(n: Loose, ctx: SerializeContext): ExportedText | null {
+/** 읽을 속성. Figma는 일부 속성(예: 오류가 있는 컴포넌트 세트의 componentProperties)을 읽을 때 예외를 낸다 */
+const FIELDS = [
+	'id',
+	'name',
+	'type',
+	'visible',
+	'opacity',
+	'absoluteBoundingBox',
+	'absoluteRenderBounds',
+	'rotation',
+	'clipsContent',
+	'fills',
+	'strokes',
+	'strokeWeight',
+	'strokeAlign',
+	'cornerRadius',
+	'topLeftRadius',
+	'topRightRadius',
+	'bottomRightRadius',
+	'bottomLeftRadius',
+	'effects',
+	'layoutMode',
+	'itemSpacing',
+	'paddingTop',
+	'paddingRight',
+	'paddingBottom',
+	'paddingLeft',
+	'primaryAxisAlignItems',
+	'counterAxisAlignItems',
+	'characters',
+	'textAlignHorizontal',
+	'textAlignVertical',
+	'textAutoResize',
+	'textTruncation',
+	'maxLines',
+	'reactions',
+	'componentProperties',
+	'children'
+] as const;
+
+function errorText(error: unknown): string {
+	return String(error).replace(/^Error:\s*/, '');
+}
+
+/** 속성을 하나씩 읽어 복사한다. 읽다 예외가 나면 그 속성만 빼고 경고를 남긴다 */
+export function snapshot(node: Loose, ctx: SerializeContext): Loose {
+	const out: Loose = {};
+	const label = (): string => `${str(out.id, '?')} "${str(out.name)}"`;
+	for (const key of FIELDS) {
+		try {
+			if (!(key in node)) continue;
+			out[key] = node[key];
+		} catch (error) {
+			ctx.warnings.push(`${label()}: ${key}를 읽지 못해 비워 둠 (${errorText(error)})`);
+		}
+	}
+	return out;
+}
+
+function text(n: Loose, original: Loose, ctx: SerializeContext): ExportedText | null {
 	if (n.type !== 'TEXT') return null;
 	let segments: TextSegment[] = [];
-	const getSegments = n.getStyledTextSegments;
+	const getSegments = original.getStyledTextSegments;
 	if (typeof getSegments === 'function') {
 		try {
-			const raw = getSegments.call(n, [
+			const raw = getSegments.call(original, [
 				'fontName',
 				'fontSize',
 				'fontWeight',
@@ -118,7 +177,7 @@ function text(n: Loose, ctx: SerializeContext): ExportedText | null {
 				};
 			});
 		} catch (error) {
-			ctx.warnings.push(`${str(n.id)} "${str(n.name)}": 글자 스타일을 읽지 못함 (${String(error)})`);
+			ctx.warnings.push(`${str(n.id)} "${str(n.name)}": 글자 스타일을 읽지 못함 (${errorText(error)})`);
 		}
 	}
 	return {
@@ -161,34 +220,70 @@ function reactions(n: Loose): ExportedReaction[] {
 	return out;
 }
 
-async function component(n: Loose, ctx: SerializeContext): Promise<ExportedNode['component']> {
+async function component(n: Loose, original: Loose, ctx: SerializeContext): Promise<ExportedNode['component']> {
 	if (n.type !== 'INSTANCE') return null;
 	let name = str(n.name);
 	let setName: string | null = null;
 	try {
-		const getMain = n.getMainComponentAsync;
-		const main = typeof getMain === 'function' ? ((await getMain.call(n)) as Loose | null) : null;
+		const getMain = original.getMainComponentAsync;
+		const main = typeof getMain === 'function' ? ((await getMain.call(original)) as Loose | null) : null;
 		if (main !== null) {
 			name = str(main.name, name);
 			const parent = main.parent as Loose | null | undefined;
 			if (parent?.type === 'COMPONENT_SET') setName = str(parent.name);
 		}
 	} catch (error) {
-		ctx.warnings.push(`${str(n.id)} "${str(n.name)}": 메인 컴포넌트를 읽지 못함 (${String(error)})`);
+		ctx.warnings.push(`${str(n.id)} "${str(n.name)}": 메인 컴포넌트를 읽지 못함 (${errorText(error)})`);
 	}
 	const properties: Record<string, string | boolean> = {};
-	const props = (n.componentProperties ?? {}) as Record<string, Loose>;
+	const props = (n.componentProperties ?? {}) as Record<string, Loose | null>;
 	for (const [key, value] of Object.entries(props)) {
-		const v = value.value;
+		const v = value?.value;
 		// 변형이 아닌 속성 이름에는 "#숫자:숫자"가 붙는다
 		if (typeof v === 'string' || typeof v === 'boolean') properties[key.replace(/#[\d:]+$/, '')] = v;
 	}
 	return { name, setName, properties };
 }
 
-/** 노드 하나와 자손을 옮긴다. 읽지 못한 노드는 경고를 남기고 기본값으로 채운다 */
+/**
+ * 노드 하나와 자손을 옮긴다. 읽지 못한 속성은 경고를 남기고 기본값으로 채운다.
+ * 한 노드에서 예상하지 못한 오류가 나도 전체 내보내기는 멈추지 않는다.
+ */
 export async function serializeNode(node: unknown, ctx: SerializeContext): Promise<ExportedNode> {
-	const n = node as Loose;
+	const original = node as Loose;
+	const n = snapshot(original, ctx);
+	try {
+		return await serializeFields(n, original, ctx);
+	} catch (error) {
+		ctx.warnings.push(
+			`${str(n.id, '?')} "${str(n.name)}": 노드를 읽지 못해 자손 없이 기본값으로 둠 (${errorText(error)})`
+		);
+		return {
+			id: str(n.id),
+			name: str(n.name),
+			type: str(n.type),
+			visible: n.visible !== false,
+			opacity: num(n.opacity, 1),
+			box: box(n.absoluteBoundingBox),
+			renderBox: null,
+			rotation: 0,
+			clipsContent: false,
+			fills: [],
+			strokes: [],
+			strokeWeight: null,
+			strokeAlign: null,
+			cornerRadius: null,
+			effects: [],
+			layout: null,
+			component: null,
+			text: null,
+			reactions: [],
+			children: []
+		};
+	}
+}
+
+async function serializeFields(n: Loose, original: Loose, ctx: SerializeContext): Promise<ExportedNode> {
 	const children: ExportedNode[] = [];
 	if (Array.isArray(n.children)) {
 		for (const child of n.children) children.push(await serializeNode(child, ctx));
@@ -213,8 +308,8 @@ export async function serializeNode(node: unknown, ctx: SerializeContext): Promi
 		cornerRadius: cornerRadius(n, ctx),
 		effects: effects(n.effects),
 		layout: layout(n),
-		component: await component(n, ctx),
-		text: text(n, ctx),
+		component: await component(n, original, ctx),
+		text: text(n, original, ctx),
 		reactions: reactions(n),
 		children
 	};

@@ -1,5 +1,6 @@
 import type { FigmaElement, NormalizedFrame } from './normalize';
 import { elementById } from './normalize';
+import { visualCounts, visuals } from './visual';
 
 /**
  * 반복 요소 묶기 (설계 7.2, D-011). 실제 GUI 파일은 카드가 컴포넌트가 아니므로 이름·컴포넌트로 묶을 수 없다.
@@ -10,7 +11,7 @@ import { elementById } from './normalize';
 export interface RepeatOptions {
 	/** 너비·높이 비율 하한 (작은 쪽 ÷ 큰 쪽) */
 	minSizeRatio: number;
-	/** 하위 구조 유사도(자손 종류·깊이 다중집합의 Jaccard) 하한 */
+	/** 하위 구조 유사도(보이는 요소 종류 다중집합의 Jaccard) 하한 */
 	minStructureSimilarity: number;
 	/**
 	 * 하위 구조 포함도(겹침 ÷ 작은 쪽) 하한. 포커스 카드처럼 레이어가 더해진 경우 Jaccard는 낮아도
@@ -19,7 +20,7 @@ export interface RepeatOptions {
 	minStructureOverlap: number;
 	/** 포함도로 인정할 때 Jaccard 최소값 */
 	minJaccardWithOverlap: number;
-	/** 하위 구조를 볼 깊이 */
+	/** structureTokens(진단용)로 볼 깊이 */
 	structureDepth: number;
 }
 
@@ -75,14 +76,19 @@ export function multisetJaccard(a: Map<string, number>, b: Map<string, number>):
 
 const ratio = (a: number, b: number): number => (Math.max(a, b) === 0 ? 1 : Math.min(a, b) / Math.max(a, b));
 
+/** 묶기용 종류: GROUP·FRAME·인스턴스·도형은 같은 "상자"로 본다 (디자이너가 섞어 쓰므로) */
+function boxClass(e: FigmaElement): 'text' | 'image' | 'box' {
+	return e.kind === 'text' ? 'text' : e.kind === 'image' ? 'image' : 'box';
+}
+
 function similar(
 	frame: NormalizedFrame,
 	a: FigmaElement,
 	b: FigmaElement,
 	options: RepeatOptions,
-	tokenCache: Map<string, Map<string, number>>
+	cache: Map<string, Map<string, number>>
 ): boolean {
-	if (a.kind !== b.kind || a.type !== b.type) return false;
+	if (boxClass(a) !== boxClass(b)) return false;
 	if (a.kind === 'text') {
 		return (
 			a.text?.fontSize === b.text?.fontSize &&
@@ -92,16 +98,17 @@ function similar(
 	}
 	if (ratio(a.rect.width, b.rect.width) < options.minSizeRatio) return false;
 	if (ratio(a.rect.height, b.rect.height) < options.minSizeRatio) return false;
-	const tokens = (e: FigmaElement): Map<string, number> => {
-		let t = tokenCache.get(e.id);
+	// 하위 구조는 노드 종류·깊이가 아니라 보이는 요소 종류의 개수로 본다 (감싸기만 하는 상자는 무시)
+	const counts = (e: FigmaElement): Map<string, number> => {
+		let t = cache.get(e.id);
 		if (t === undefined) {
-			t = structureTokens(frame, e, options.structureDepth);
-			tokenCache.set(e.id, t);
+			t = visualCounts(visuals(frame, e));
+			cache.set(e.id, t);
 		}
 		return t;
 	};
-	const ta = tokens(a);
-	const tb = tokens(b);
+	const ta = counts(a);
+	const tb = counts(b);
 	const jaccard = multisetJaccard(ta, tb);
 	if (jaccard >= options.minStructureSimilarity) return true;
 	return jaccard >= options.minJaccardWithOverlap && multisetOverlap(ta, tb) >= options.minStructureOverlap;

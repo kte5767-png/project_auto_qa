@@ -8,7 +8,7 @@ import type { SerializeContext } from './serialize';
  * 노드 트리 + PNG로 모아 UI로 넘긴다. 파일 저장은 UI(iframe)가 한다. 네트워크는 쓰지 않는다 (manifest).
  */
 
-const PLUGIN_VERSION = '0.1.0';
+const PLUGIN_VERSION = '0.1.1';
 const EXPORTABLE = new Set(['FRAME', 'COMPONENT', 'COMPONENT_SET', 'INSTANCE', 'SECTION', 'GROUP']);
 
 interface ExportRequest {
