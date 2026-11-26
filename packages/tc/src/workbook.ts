@@ -6,6 +6,8 @@ import { cleanText } from './grid';
 import type { Grid, GridSheet, MergeRange } from './grid';
 import type { CellRef } from './types';
 import {
+	addMergeCells,
+	cellStyle,
 	parseSharedStrings,
 	relationshipTargets,
 	resolvePart,
@@ -75,6 +77,8 @@ export async function readWorkbook(path: string): Promise<Grid> {
 export interface ResultWrite {
 	cell: CellRef;
 	value: string;
+	/** 이 주소(같은 시트) 칸의 스타일을 따른다 (테두리·글꼴을 원본 표와 맞춤). 없으면 행·열 스타일 */
+	styleFrom?: string | null;
 }
 
 export interface ResultWriteReport {
@@ -95,7 +99,7 @@ export async function writeResultCopy(
 	sourcePath: string,
 	outputPath: string,
 	writes: readonly ResultWrite[],
-	options: { overwrite?: boolean } = {}
+	options: { overwrite?: boolean; merges?: readonly { sheet: string; ref: string }[] } = {}
 ): Promise<ResultWriteReport> {
 	if (resolve(sourcePath) === resolve(outputPath)) {
 		throw new Error('원본 파일에는 쓰지 않습니다. 다른 출력 경로를 지정해 주세요.');
@@ -118,19 +122,37 @@ export async function writeResultCopy(
 	const report: ResultWriteReport = { written: 0, skipped: [], formula: [], changedParts: [] };
 	const bySheet = new Map<string, ResultWrite[]>();
 	for (const w of writes) bySheet.set(w.cell.sheet, [...(bySheet.get(w.cell.sheet) ?? []), w]);
+	const mergesBySheet = new Map<string, string[]>();
+	for (const m of options.merges ?? []) mergesBySheet.set(m.sheet, [...(mergesBySheet.get(m.sheet) ?? []), m.ref]);
+	for (const sheet of mergesBySheet.keys()) if (!bySheet.has(sheet)) bySheet.set(sheet, []);
 	for (const [sheet, sheetWrites] of bySheet) {
 		const path = sheetPaths.get(sheet);
 		if (path === undefined) throw new Error(`시트가 없습니다: ${sheet}`);
 		let xml = await text(path);
 		let changed = false;
+		const original = xml;
 		for (const w of sheetWrites) {
-			const result = setCellText(xml, w.cell.address, w.value, { ...options, sharedStrings });
+			const style =
+				w.styleFrom === undefined || w.styleFrom === null ? undefined : cellStyle(original, w.styleFrom);
+			const result = setCellText(xml, w.cell.address, w.value, {
+				overwrite: options.overwrite,
+				sharedStrings,
+				style
+			});
 			if (result.status === 'skipped-existing') report.skipped.push(w.cell);
 			else if (result.status === 'skipped-formula') report.formula.push(w.cell);
 			else {
 				xml = result.xml;
 				changed = true;
 				report.written++;
+			}
+		}
+		const merges = mergesBySheet.get(sheet) ?? [];
+		if (merges.length > 0) {
+			const merged = addMergeCells(xml, merges);
+			if (merged !== xml) {
+				xml = merged;
+				changed = true;
 			}
 		}
 		if (changed) {

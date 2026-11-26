@@ -59,6 +59,11 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(kinds(find('팝업 닫힘'))).toEqual(['behavior:code']);
 	});
 
+	it('"페이지 진입 시"는 화면 전환이 아니라 진입했을 때의 조건이다', () => {
+		const [c] = splitClauses('- Search 페이지 진입 시 VKB 호출하며, Search field에 커서가 제공됨');
+		expect(kinds(c)).toEqual(['focus:code', 'keyboard:code']);
+	});
+
 	it('괄호 속 참조는 보충으로 보고, 검색·편성 규칙과 글자 입력 조건은 화면으로 확인하지 않는다', () => {
 		const [menu, search, sorted, typed, idx] = splitClauses(
 			[
