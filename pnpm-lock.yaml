@@ -142,6 +142,12 @@ importers:
         specifier: ^8.15.0
         version: 8.19.0
 
+  packages/judge:
+    dependencies:
+      '@auto-qa/spec':
+        specifier: workspace:*
+        version: link:../spec
+
   packages/llm: {}
 
   packages/planner:
@@ -245,6 +251,19 @@ importers:
 
   spikes/p0-7-tc:
     dependencies:
+      '@auto-qa/tc':
+        specifier: workspace:*
+        version: link:../../packages/tc
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
+  spikes/p0-8-judge:
+    dependencies:
+      '@auto-qa/judge':
+        specifier: workspace:*
+        version: link:../../packages/judge
       '@auto-qa/tc':
         specifier: workspace:*
         version: link:../../packages/tc
