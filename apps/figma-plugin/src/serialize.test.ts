@@ -207,6 +207,41 @@ describe('serializeNode', () => {
 		expect(ctx.warnings).toEqual([expect.stringContaining('broken "Broken": 글자 스타일을 읽지 못함')]);
 	});
 
+	it('읽을 때 예외가 나는 속성(오류가 있는 컴포넌트 세트)은 비우고 경고를 남긴 뒤 계속한다', async () => {
+		const root = screen();
+		const button = root.children?.[4];
+		if (button === undefined) throw new Error('버튼 없음');
+		Object.defineProperty(button, 'componentProperties', {
+			get() {
+				throw new Error('in get_componentProperties: Component set for node has existing errors');
+			}
+		});
+		const ctx: SerializeContext = { mixed: MIXED, warnings: [] };
+		const out = await serializeNode(root, ctx);
+		expect(out.children).toHaveLength(6);
+		expect(out.children[4]?.component).toEqual({ name: 'State=Focused', setName: 'Btn_main', properties: {} });
+		expect(out.children[4]?.children[0]?.text?.characters).toBe('Watch now');
+		expect(ctx.warnings).toContainEqual(
+			'btn "Btn_main(New)": componentProperties를 읽지 못해 비워 둠 (in get_componentProperties: Component set for node has existing errors)'
+		);
+	});
+
+	it('한 노드에서 예상하지 못한 오류가 나도 그 노드만 기본값으로 두고 나머지는 내보낸다', async () => {
+		const root = screen();
+		const card = root.children?.[1];
+		if (card === undefined) throw new Error('카드 없음');
+		card.children = new Proxy([], {
+			get() {
+				throw new Error('boom');
+			}
+		}) as unknown as Fake[];
+		const ctx: SerializeContext = { mixed: MIXED, warnings: [] };
+		const out = await serializeNode(root, ctx);
+		expect(out.children).toHaveLength(6);
+		expect(out.children[1]).toMatchObject({ id: 'c1', children: [] });
+		expect(ctx.warnings.some((w) => w.startsWith('c1 "Frame 208567061": 노드를 읽지 못해'))).toBe(true);
+	});
+
 	it('노드가 속한 페이지를 찾는다', () => {
 		const root = screen();
 		expect(pageOf(root.children?.[0])).toEqual({ id: '0:1', name: 'GUI' });
