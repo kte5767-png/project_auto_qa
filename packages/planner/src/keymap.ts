@@ -166,6 +166,11 @@ function f1(a: readonly string[], b: readonly string[]): number {
 	return (2 * p * r) / (p + r);
 }
 
+/** 두 이름의 낱말 일치(F1, 0~1). 조사·일반 낱말은 빼고 비교한다 */
+export function nameScore(a: string, b: string, options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS): number {
+	return f1(nameTokens(a, options), nameTokens(b, options));
+}
+
 /** 콜아웃 이름 + 사람이 정한 다른 이름 */
 function namesOf(c: NavCallout, options: KeyMapOptions): string[] {
 	const out = [...c.names];
