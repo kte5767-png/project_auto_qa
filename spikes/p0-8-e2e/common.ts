@@ -51,15 +51,14 @@ export async function jsonFiles(paths: readonly string[], cwd: string): Promise<
 
 /** 화면설계서 내보내기 → 화면 번호별 이동 지도 */
 export async function loadKeyMaps(paths: readonly string[], options: KeyMapOptions): Promise<Map<string, KeyAction[]>> {
-	const specs: SpecScreen[] = [];
+	// 나눠 내보낸 파일(-p01of18…)을 한 폴더에서 읽는다. 같은 프레임을 다시 내보냈으면 나중 파일(이름순)을 쓴다
 	const frames = new Map<string, NormalizedFrame>();
 	for (const f of paths) {
 		for (const a of analyzeExport(parseExport(JSON.parse(await readFile(f, 'utf8'))))) {
-			if (a.kind !== 'spec') continue;
-			frames.set(a.frame.id, a.frame);
-			specs.push(extractSpecScreen(a.frame));
+			if (a.kind === 'spec') frames.set(a.frame.id, a.frame);
 		}
 	}
+	const specs: SpecScreen[] = [...frames.values()].map((frame) => extractSpecScreen(frame));
 	const maps = new Map<string, KeyAction[]>();
 	for (const merged of mergeSpecScreens(specs)) {
 		const screen = navScreenFromSpec(merged, frames);

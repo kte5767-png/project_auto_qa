@@ -1,9 +1,9 @@
 {
 	"name": "@auto-qa/figma-plugin",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"private": true,
 	"type": "module",
-	"description": "Figma 내보내기 플러그인: 선택한 프레임의 노드 트리와 PNG를 auto-qa 내보내기 JSON 한 파일로 저장 (D-009)",
+	"description": "Figma 내보내기 플러그인: 선택한 프레임의 노드 트리와 PNG를 auto-qa 내보내기 JSON으로 저장 (D-009, 많으면 N개씩 나눠 저장)",
 	"scripts": {
 		"build": "node build.mjs",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
