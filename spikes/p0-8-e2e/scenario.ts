@@ -18,6 +18,8 @@ export interface ElementDef {
 	callout?: string;
 	/** 화면설계서 문장에서 부르는 이름 (콜아웃이 아닌 요소·화면 밖 대상, 예: "GNB") */
 	names?: string[];
+	/** 포커스가 이 요소에 있을 때 화면 안으로 돌아오는 키 (예: GNB → RIGHT). 없으면 그 화면이 안 보일 때 BACK */
+	exit?: RemoteKey;
 }
 
 export type EntryStep =
@@ -51,9 +53,13 @@ export interface Timing {
 	readyTimeoutMs: number;
 	/** 조건 확인 간격 (ms) */
 	pollMs: number;
+	/** 화면 밖으로 나간 포커스를 되돌릴 때 누를 키 수 상한 (BACK·exit 키) */
+	maxReturnKeys: number;
+	/** 이동 지도에 길이 없을 때 방향으로 찾아갈 키 수 상한 (목표 지향 탐색) */
+	maxSearchKeys: number;
 }
 
-export const DEFAULT_TIMING: Timing = { readyTimeoutMs: 20000, pollMs: 200 };
+export const DEFAULT_TIMING: Timing = { readyTimeoutMs: 20000, pollMs: 200, maxReturnKeys: 3, maxSearchKeys: 10 };
 
 export interface Scenario {
 	format: typeof SCENARIO_FORMAT;

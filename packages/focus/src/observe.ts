@@ -44,6 +44,8 @@ export interface ObservedTarget {
 	focusItem: number;
 	/** 글자가 칸을 넘치는 요소 수와 그중 말줄임(text-overflow: ellipsis)인 수 */
 	textOverflow: { overflowing: number; ellipsis: number };
+	/** 처음 보이는 요소의 [x, y, width, height]. 보이는 것이 없으면 null */
+	rect: [number, number, number, number] | null;
 }
 
 export interface ObserveOptions {
@@ -176,8 +178,18 @@ function observeInPage(input: ObserveInput): Observation {
 				break;
 			}
 		}
+		const first = shown.length > 0 ? (shown[0] as Element).getBoundingClientRect() : null;
 		return {
 			name: t.name,
+			rect:
+				first === null
+					? null
+					: [
+							Math.round(first.left),
+							Math.round(first.top),
+							Math.round(first.width),
+							Math.round(first.height)
+						],
 			matched: matches.length,
 			visible: shown.length,
 			texts: shown.reduce((all: string[], m) => all.concat(textsOf(m)), []),

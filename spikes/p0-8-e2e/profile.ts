@@ -151,6 +151,10 @@ export function validateProfile(data: unknown): string[] {
 	if (typeof p.screens !== 'object' || p.screens === null) return [...errors, 'screens 없음'];
 	const profile = p as AppProfile;
 	const registry = buildRegistry(profile);
+	for (const [name, e] of Object.entries(profile.elements ?? {})) {
+		if (e.exit !== undefined && !isRemoteKey(e.exit))
+			errors.push(`elements.${name}: 모르는 exit 키 ${String(e.exit)}`);
+	}
 	for (const [screen, def] of Object.entries(profile.screens)) {
 		const where = `screens.${screen}`;
 		if (typeof def.detect !== 'string' || def.detect === '') errors.push(`${where}: detect 없음`);
