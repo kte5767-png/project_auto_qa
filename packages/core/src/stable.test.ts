@@ -20,6 +20,12 @@ describe('stableWaitScript', () => {
 		});
 	});
 
+	it('흐르는 글자(마키) 안의 변경·애니메이션은 무시한다 (기본 선택자, 빈 문자열이면 끔)', () => {
+		expect(DEFAULT_STABLE_OPTIONS.ignore).toContain('marquee');
+		expect(embeddedOptions(stableWaitScript({ ignore: '' }))).toMatchObject({ ignore: '' });
+		expect(stableWaitScript()).toContain('closest');
+	});
+
 	it('구형 엔진 대비: getAnimations가 없을 때의 분기가 들어 있다', () => {
 		const script = stableWaitScript();
 		expect(script).toContain('getAnimations');

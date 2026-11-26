@@ -20,9 +20,19 @@ export interface StableOptions {
 	 * CSS 전환이 끝나기 전에 안정으로 판단하지 않도록 quietMs보다 길게 잡는다 (ms)
 	 */
 	legacyQuietMs: number;
+	/**
+	 * 이 선택자 안의 DOM 변경·애니메이션은 무시한다 (흐르는 글자(마키)처럼 포커스된 동안 끝없이 움직이는 요소).
+	 * 빈 문자열이면 무시하지 않는다
+	 */
+	ignore: string;
 }
 
-export const DEFAULT_STABLE_OPTIONS: StableOptions = { quietMs: 120, timeoutMs: 3000, legacyQuietMs: 400 };
+export const DEFAULT_STABLE_OPTIONS: StableOptions = {
+	quietMs: 120,
+	timeoutMs: 3000,
+	legacyQuietMs: 400,
+	ignore: '[class*="marquee"], [class*="Marquee"]'
+};
 
 export interface StableResult {
 	stable: boolean;

@@ -145,7 +145,10 @@ export class Session {
 	/** 이 세션에서 누른 키 수 (진입 직후인지 보는 데 쓴다) */
 	presses = 0;
 
-	async press(key: RemoteKey): Promise<{ obs: Observation; stable: boolean }> {
+	/**
+	 * 키 하나 + 안정화 대기. show = 사람이 볼 확인 키(headed에서 멈춤). 진입·길·홈 되돌리기 키는 멈추지 않는다
+	 */
+	async press(key: RemoteKey, show = true): Promise<{ obs: Observation; stable: boolean }> {
 		this.presses++;
 		await this.driver.pressKey(key);
 		const s = await this.driver.waitForStable();
@@ -159,7 +162,7 @@ export class Session {
 			stable = stable && settled.settled;
 		}
 		// 사람이 볼 수 있게 멈춤 (headed). 화면이 바뀌는 키는 결과 화면을 볼 수 있게 두 배
-		const pause = navigates ? this.pauseMs * 2 : this.pauseMs;
+		const pause = !show ? 0 : navigates ? this.pauseMs * 2 : this.pauseMs;
 		if (pause > 0) await new Promise((r) => setTimeout(r, pause));
 		return { obs, stable };
 	}
@@ -215,12 +218,15 @@ export async function runEntry(session: Session, entry: readonly EntryStep[], tr
 		} else {
 			const goal = step.until;
 			if (goal === undefined) {
-				const r = await session.press(step.press);
+				const r = await session.press(step.press, false);
 				record(trail, { key: step.press, focus: focusText(r.obs), stable: r.stable });
 				continue;
 			}
 			const reached = (o: Observation): boolean => target(o, goal)?.hasFocus === true;
-			if (reached(await session.observe())) continue;
+			const start = await session.observe();
+			if (reached(start)) continue;
+			// 시작할 때 포커스가 있던 요소(예: GNB). 키를 눌러 그 밖으로 나가면 헛돌지 않고 바로 멈춘다
+			const startIn = start.targets.filter((t) => t.hasFocus && !t.name.startsWith('@')).map((t) => t.name);
 			const max = step.max ?? 5;
 			let done = false;
 			for (const [key, times] of [
@@ -228,9 +234,12 @@ export async function runEntry(session: Session, entry: readonly EntryStep[], tr
 				...(step.else === undefined ? [] : [[step.else, max * 2] as const])
 			] as const) {
 				for (let i = 0; i < times && !done; i++) {
-					const r = await session.press(key);
+					const r = await session.press(key, false);
 					record(trail, { key, focus: focusText(r.obs), stable: r.stable });
 					done = reached(r.obs);
+					if (!done && startIn.length > 0 && !startIn.some((n) => target(r.obs, n)?.hasFocus === true)) {
+						return `${KEY_LABEL[key]} 후 포커스가 ${startIn.join('·')} 밖으로 나감 (${focusText(r.obs)})`;
+					}
 				}
 				if (done) break;
 			}

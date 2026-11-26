@@ -352,11 +352,21 @@ class Runner {
 		this.current = null;
 		const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
 		if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
-		const session = this.newSession(screen);
-		let error = await runEntry(session, entryPath(ctx.profile, ctx.registry, screen), trail);
-		if (error === null) {
+		let session = this.newSession(screen);
+		const enter = async (): Promise<string | null> => {
+			const e = await runEntry(session, entryPath(ctx.profile, ctx.registry, screen), trail);
+			if (e !== null) return e;
 			const shown = await session.until((o) => this.shown(o, screen), ctx.timing.readyTimeoutMs);
-			if (shown === null) error = `${screen} 화면 표시(detect)가 보이지 않음`;
+			return shown === null ? `${screen} 화면 표시(detect)가 보이지 않음` : null;
+		};
+		let error = await enter();
+		if (error !== null) {
+			// 한 번만 다시: 홈으로 돌아가 진입 경로를 처음부터 (그래도 안 되면 멈춘다 — 헛돌지 않음)
+			record(trail, { key: null, focus: `진입 실패 → 홈부터 한 번 더 (${error})`, stable: true }, '      ');
+			const again = await this.resetHome(trail);
+			if (again !== null || this.app === null) return again ?? '앱을 열지 못함';
+			session = this.newSession(screen);
+			error = await enter();
 		}
 		if (error !== null) return error;
 		this.current = {
@@ -453,6 +463,17 @@ class Runner {
 	 */
 	async reach(screen: string, no: string, trail: Trail[]): Promise<Miss | null> {
 		if (!this.fresh(screen)) {
+			// 앞 키를 누른 뒤에도 포커스가 이 화면 콜아웃 안이면 홈까지 가지 않고 그 자리에서 목표로 (확인당 키 수를 줄임).
+			// 화면이 바뀌었거나(OK) 화면 밖(GNB)·팝업이면, 또는 그 자리에서 못 가면 홈 → 진입 경로
+			if (this.inScreen(await this.session.observe(), screen)) {
+				const miss = await this.tryReach(screen, no, trail);
+				if (miss === null) return null;
+				record(
+					trail,
+					{ key: null, focus: `그 자리에서 못 감 → 홈부터 (${miss.reason})`, stable: true },
+					'      '
+				);
+			}
 			const error = await this.open(screen, trail);
 			if (error !== null) return { reason: `진입 실패: ${error}`, again: false };
 		}
@@ -509,7 +530,7 @@ class Runner {
 	}
 
 	private async step(key: RemoteKey, trail: Trail[], label: string): Promise<Observation> {
-		const r = await this.session.press(key);
+		const r = await this.session.press(key, false);
 		record(trail, { key, focus: focusText(r.obs), stable: r.stable }, label);
 		return r.obs;
 	}
@@ -746,7 +767,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 			results.push(res(clause, check, null, `모르는 키 ${String(check.value)}`));
 			continue;
 		}
-		// 같은 화면·같은 출발(콜아웃 첫 항목)·같은 키는 매번 홈에서 새로 들어가 확인하므로 결과가 같다 → 한 번만 실행
+		// 같은 화면·같은 출발(콜아웃 첫 항목)·같은 키는 결과가 같다고 보고 한 번만 실행 (이동 이력 조건은 실제 지나간 위치로 기대값을 계산)
 		const cacheKey = `${screen}|${no}|${key}`;
 		const cached = runner.moves.get(cacheKey);
 		if (cached !== undefined) {
