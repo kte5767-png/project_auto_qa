@@ -19,7 +19,15 @@ export interface LaunchOptions {
 
 export async function launchBrowser(options: LaunchOptions = {}): Promise<Browser> {
 	const headless = options.headless ?? true;
-	const args = [...(options.args ?? [])];
+	// 다른 창에 가려지거나 최소화돼도 렌더링·타이머·requestAnimationFrame을 멈추지 않게 한다.
+	// (Windows Chrome은 가려진 창을 숨김으로 보고 멈춰, 안정화 대기·포커스 이동이 멈춘 것처럼 보인다)
+	const args = [
+		'--disable-features=CalculateNativeWinOcclusion',
+		'--disable-backgrounding-occluded-windows',
+		'--disable-renderer-backgrounding',
+		'--disable-background-timer-throttling',
+		...(options.args ?? [])
+	];
 	if (options.windowScale !== undefined) {
 		args.push(`--force-device-scale-factor=${options.windowScale}`, '--window-position=0,0');
 	}

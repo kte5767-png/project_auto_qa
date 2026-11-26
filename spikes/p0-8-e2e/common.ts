@@ -84,6 +84,12 @@ export interface Trail {
 	stable: boolean;
 }
 
+/** 로딩 표시(스피너·스켈레톤 등). 보이는 동안은 화면이 준비되지 않은 것으로 본다. 프로필 `loading`으로 바꾼다 */
+export const DEFAULT_LOADING_SELECTOR =
+	'[class*="Spinner"], [class*="spinner"], [class*="Skeleton"], [class*="skeleton"], [aria-busy="true"]';
+
+const LOADING = '@loading';
+
 export class Session {
 	private readonly targets: ObserveTarget[];
 	/** 요소별 마지막 포커스 항목 (화면설계서 "이동한 이력이 있을 경우") */
@@ -95,9 +101,37 @@ export class Session {
 		readonly focusSelector: string | null,
 		readonly timing: Timing,
 		/** 키마다 사람이 볼 수 있게 멈추는 시간 (판정과 무관) */
-		readonly pauseMs: number
+		readonly pauseMs: number,
+		loadingSelector: string | null = DEFAULT_LOADING_SELECTOR
 	) {
 		this.targets = observeTargetsOf(elements);
+		if (loadingSelector !== null && loadingSelector !== '') {
+			this.targets.push({ name: LOADING, selector: loadingSelector, textIncludes: null, items: null });
+		}
+	}
+
+	/** 로딩 표시가 보이는가 */
+	loading(obs: Observation): boolean {
+		return (target(obs, LOADING)?.visible ?? 0) > 0;
+	}
+
+	/**
+	 * 화면이 자리 잡을 때까지 기다린다: 로딩 표시가 없고, 포커스가 있고, 두 번 연달아 본 포커스가 같을 때.
+	 * 페이지 이동(OK·BACK) 뒤 로딩 화면에서 다음 키를 누르지 않게 한다. 고정 sleep이 아니라 조건 대기
+	 */
+	async settle(timeoutMs: number): Promise<{ obs: Observation; settled: boolean }> {
+		const end = Date.now() + timeoutMs;
+		let prev: string | null = null;
+		for (;;) {
+			await this.driver.waitForStable();
+			const obs = await this.observe();
+			const f = obs.focus;
+			const key = this.loading(obs) || f === null ? null : `${focusText(obs)}@${f.rect.join(',')}`;
+			if (key !== null && key === prev) return { obs, settled: true };
+			prev = key;
+			if (Date.now() >= end) return { obs, settled: false };
+			await new Promise((r) => setTimeout(r, this.timing.pollMs));
+		}
 	}
 
 	async observe(): Promise<Observation> {
@@ -111,9 +145,19 @@ export class Session {
 	async press(key: RemoteKey): Promise<{ obs: Observation; stable: boolean }> {
 		await this.driver.pressKey(key);
 		const s = await this.driver.waitForStable();
-		const obs = await this.observe();
-		if (this.pauseMs > 0) await new Promise((r) => setTimeout(r, this.pauseMs));
-		return { obs, stable: s.stable };
+		let obs = await this.observe();
+		let stable = s.stable;
+		// 화면이 바뀌는 키(OK·BACK)이거나 포커스가 사라졌거나 로딩 중이면 자리 잡을 때까지 기다린다
+		const navigates = key === 'OK' || key === 'BACK';
+		if (navigates || obs.focus === null || this.loading(obs)) {
+			const settled = await this.settle(this.timing.readyTimeoutMs);
+			obs = settled.obs;
+			stable = stable && settled.settled;
+		}
+		// 사람이 볼 수 있게 멈춤 (headed). 화면이 바뀌는 키는 결과 화면을 볼 수 있게 두 배
+		const pause = navigates ? this.pauseMs * 2 : this.pauseMs;
+		if (pause > 0) await new Promise((r) => setTimeout(r, pause));
+		return { obs, stable };
 	}
 
 	/** 조건이 맞을 때까지 확인 (고정 sleep 대신 조건 대기) */
