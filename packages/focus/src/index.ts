@@ -9,3 +9,24 @@ export { colorLuminance, diffStyles, emphasisScore, pickByStyleDiff, transformSc
 export { commonAncestor, depth, isAncestor, isSelfOrAncestor } from './paths';
 export type { ObserveOptions, ObserveTarget, Observation, ObservedFocus, ObservedTarget } from './observe';
 export { DEFAULT_OBSERVE_OPTIONS, observeScript, observeTargets } from './observe';
+export type {
+	FingerprintLayer,
+	FingerprintOptions,
+	HomeMatch,
+	HomeMatchOptions,
+	ResetRules,
+	ResetState,
+	ResetStep,
+	ScreenFingerprint
+} from './fingerprint';
+export {
+	DEFAULT_FINGERPRINT_OPTIONS,
+	DEFAULT_HOME_MATCH,
+	DEFAULT_RESET_RULES,
+	fingerprintScript,
+	itemSimilarity,
+	matchHome,
+	nextResetStep,
+	sameFingerprint,
+	takeFingerprint
+} from './fingerprint';

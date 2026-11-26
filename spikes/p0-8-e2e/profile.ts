@@ -1,4 +1,7 @@
 import { isRemoteKey } from '@auto-qa/core';
+import type { RemoteKey } from '@auto-qa/core';
+import { DEFAULT_HOME_MATCH, DEFAULT_RESET_RULES } from '@auto-qa/focus';
+import type { FingerprintOptions, HomeMatchOptions, ResetRules } from '@auto-qa/focus';
 import type { ElementDef, EntryStep, Timing } from './scenario';
 
 /**
@@ -38,6 +41,56 @@ export interface AppProfile {
 	/** 화면 밖 대상 등 공통 요소 (예: GNB) */
 	elements?: Record<string, ElementDef>;
 	screens: Record<string, ScreenDef>;
+	/**
+	 * 처음 화면으로 되돌리기 규칙 (D-039). 모두 선택 — 없으면 기본값(BACK으로 올라가고, 포커스가 든 팝업은 BACK으로 닫고,
+	 * OK는 누르지 않음). 공통 요소의 `exit` 키는 "그 영역에서 나가는 키"로 함께 쓴다 (예: GNB → RIGHT)
+	 */
+	reset?: ResetDef;
+}
+
+export interface ResetDef {
+	/** 겹친 층(팝업·토스트) 선택자 */
+	layers?: string;
+	/** 포커스 가능 요소 선택자 (화면 지문) */
+	focusables?: string;
+	/** 같은 화면으로 볼 요소 유사도 (0~1) */
+	minSimilarity?: number;
+	backKey?: RemoteKey;
+	closePopupKey?: RemoteKey;
+	/** 되돌리기 중 누르지 않는 키 (기본 OK) */
+	forbidden?: RemoteKey[];
+}
+
+/** 프로필 → 화면 지문 옵션·되돌리기 규칙. 영역은 `exit` 키가 있는 공통 요소 */
+export function resetConfig(profile: AppProfile): {
+	fingerprint: Partial<FingerprintOptions>;
+	rules: ResetRules;
+	match: HomeMatchOptions;
+} {
+	const r = profile.reset ?? {};
+	const regions: Record<string, string> = {};
+	const regionExit: Record<string, RemoteKey> = {};
+	for (const [name, e] of Object.entries(profile.elements ?? {})) {
+		if (e.exit === undefined) continue;
+		regions[name] = e.selector;
+		regionExit[name] = e.exit;
+	}
+	return {
+		fingerprint: {
+			focusSelector: profile.focusSelector ?? null,
+			regions,
+			...(r.layers === undefined ? {} : { layers: r.layers }),
+			...(r.focusables === undefined ? {} : { focusables: r.focusables })
+		},
+		rules: {
+			...DEFAULT_RESET_RULES,
+			regionExit,
+			...(r.backKey === undefined ? {} : { backKey: r.backKey }),
+			...(r.closePopupKey === undefined ? {} : { closePopupKey: r.closePopupKey }),
+			...(r.forbidden === undefined ? {} : { forbidden: r.forbidden })
+		},
+		match: { ...DEFAULT_HOME_MATCH, ...(r.minSimilarity === undefined ? {} : { minSimilarity: r.minSimilarity }) }
+	};
 }
 
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
@@ -147,6 +200,17 @@ export function validateProfile(data: unknown): string[] {
 	if (typeof data !== 'object' || data === null) return ['최상위 값이 객체가 아님'];
 	const p = data as Partial<AppProfile>;
 	if (p.format !== PROFILE_FORMAT) errors.push(`format은 "${PROFILE_FORMAT}"이어야 함`);
+	if (p.reset !== undefined) {
+		const r = p.reset as Record<string, unknown>;
+		const key = (v: unknown): boolean => typeof v === 'string' && isRemoteKey(v);
+		for (const k of ['backKey', 'closePopupKey'] as const)
+			if (r[k] !== undefined && !key(r[k])) errors.push(`reset.${k}: 리모컨 키가 아님 (${String(r[k])})`);
+		if (r['forbidden'] !== undefined && !(Array.isArray(r['forbidden']) && r['forbidden'].every(key)))
+			errors.push('reset.forbidden: 리모컨 키 목록이어야 함');
+		const sim = r['minSimilarity'];
+		if (sim !== undefined && !(typeof sim === 'number' && sim > 0 && sim <= 1))
+			errors.push('reset.minSimilarity: 0~1');
+	}
 	if (typeof p.url !== 'string' || p.url === '') errors.push('url 없음');
 	if (typeof p.screens !== 'object' || p.screens === null) return [...errors, 'screens 없음'];
 	const profile = p as AppProfile;
