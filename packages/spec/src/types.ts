@@ -67,7 +67,15 @@ export interface SpecScreen {
 	/** 헤더와 목업 사이의 화면 설명 (진입 조건) */
 	entryConditions: string[];
 	defaultFocus: string | null;
-	mockup: { rect: Rect; scale: number; screen: { width: number; height: number } } | null;
+	mockup: {
+		rect: Rect;
+		scale: number;
+		screen: { width: number; height: number };
+		/** 세로로 긴 목업(스크롤된 화면). 화면 좌표의 y가 화면 높이를 넘을 수 있다 */
+		scroll: boolean;
+		/** 화면 좌표로 본 목업 높이 */
+		contentHeight: number;
+	} | null;
 	callouts: Callout[];
 	/** [추가 설명] */
 	notes: string[];

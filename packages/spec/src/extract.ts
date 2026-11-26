@@ -19,6 +19,8 @@ export interface SpecOptions {
 	/** 목업 판정: 화면 비율 허용 오차, 프레임 너비 대비 최소 너비 */
 	mockupAspectTolerance: number;
 	mockupMinWidthRatio: number;
+	/** 세로로 긴(스크롤된 화면) 목업의 최대 세로/가로 비율. 화면 비율 목업이 없을 때만 쓴다 */
+	mockupMaxTallRatio: number;
 	/** 마커 원 지름 범위 (px) */
 	markerSize: [number, number];
 	/** 이름이 같은 목업 글자를 찾을 반경 (px, 페이지 좌표) */
@@ -30,6 +32,7 @@ export const DEFAULT_SPEC_OPTIONS: SpecOptions = {
 	headerRatio: 0.09,
 	mockupAspectTolerance: 0.03,
 	mockupMinWidthRatio: 0.4,
+	mockupMaxTallRatio: 2.2,
 	markerSize: [16, 96],
 	labelRadius: 400
 };
@@ -114,17 +117,25 @@ export function findMarkers(frame: NormalizedFrame, options: SpecOptions = DEFAU
 	return markers.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
 }
 
-/** 목업: 화면 비율(예: 16:9)이고 충분히 큰 가장 큰 칠 있는 사각형·상자 */
+/**
+ * 목업: 화면 비율(예: 16:9)이고 충분히 큰 가장 큰 상자. 없으면 같은 너비 조건의 세로로 긴 상자
+ * (스크롤된 화면을 한 장에 그린 목업, 예: 1200×900)를 쓴다.
+ */
 export function findMockup(frame: NormalizedFrame, options: SpecOptions = DEFAULT_SPEC_OPTIONS): FigmaElement | null {
-	const ratio = options.screen.width / options.screen.height;
-	let best: FigmaElement | null = null;
+	const screenRatio = options.screen.height / options.screen.width;
+	let exact: FigmaElement | null = null;
+	let tall: FigmaElement | null = null;
 	for (const e of frame.elements.slice(1)) {
-		if (!isShown(e) || e.kind === 'text' || e.rect.height === 0) continue;
+		if (!isShown(e) || e.kind === 'text' || e.rect.height === 0 || e.style.fill === null) continue;
 		if (e.rect.width < frame.width * options.mockupMinWidthRatio) continue;
-		if (Math.abs(e.rect.width / e.rect.height / ratio - 1) > options.mockupAspectTolerance) continue;
-		if (best === null || area(e.rect) > area(best.rect)) best = e;
+		const ratio = e.rect.height / e.rect.width;
+		if (Math.abs(ratio / screenRatio - 1) <= options.mockupAspectTolerance) {
+			if (exact === null || area(e.rect) > area(exact.rect)) exact = e;
+		} else if (ratio > screenRatio && ratio <= options.mockupMaxTallRatio) {
+			if (tall === null || area(e.rect) > area(tall.rect)) tall = e;
+		}
 	}
-	return best;
+	return exact ?? tall;
 }
 
 function textOf(e: FigmaElement): string {
@@ -276,13 +287,21 @@ export function extractSpecScreen(frame: NormalizedFrame, options: SpecOptions =
 	} else {
 		const m = mockupEl.rect;
 		const scale = options.screen.width / m.width;
-		mockup = { rect: m, scale: round1(scale * 1000) / 1000, screen: options.screen };
+		// 세로로 긴 목업은 스크롤된 화면이므로 화면 좌표의 세로 범위가 화면 높이보다 길다
+		const contentHeight = Math.max(options.screen.height, Math.round(m.height * scale));
+		mockup = {
+			rect: m,
+			scale: round1(scale * 1000) / 1000,
+			screen: options.screen,
+			scroll: contentHeight > options.screen.height,
+			contentHeight
+		};
 		// 화면 범위로 자른다 (강조 상자가 목업보다 조금 크게 그려진 경우)
 		const toScreen = (r: Rect): Rect => {
 			const x1 = Math.max(0, (r.x - m.x) * scale);
 			const y1 = Math.max(0, (r.y - m.y) * scale);
 			const x2 = Math.min(options.screen.width, (r.x + r.width - m.x) * scale);
-			const y2 = Math.min(options.screen.height, (r.y + r.height - m.y) * scale);
+			const y2 = Math.min(contentHeight, (r.y + r.height - m.y) * scale);
 			return {
 				x: round1(x1),
 				y: round1(y1),
