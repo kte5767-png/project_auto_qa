@@ -1,7 +1,9 @@
 export type { CdpKeyEvent, KeyDef, KeyMap, RemoteKey } from './keys';
 export { REMOTE_KEYS, WEBOS_KEY_MAP, cdpKeyEvents, parseKeySequence } from './keys';
 export type { LaunchOptions } from './session';
-export { launchBrowser, pressRemoteKey, waitForStable } from './session';
+export { launchBrowser, pressRemoteKey, probeScreen, waitForStable } from './session';
+export type { FitOptions, ScreenInfo } from './window';
+export { DEFAULT_FIT_OPTIONS, fitWindowScale } from './window';
 export type { BrowserDriverOptions } from './driver';
 export { BrowserDriver } from './driver';
 export type { StableOptions, StableResult } from '@auto-qa/core';
