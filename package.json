@@ -24,6 +24,7 @@
 		"spike:llm": "pnpm --filter @auto-qa/spike-p0-8-llm start",
 		"spike:route": "pnpm --filter @auto-qa/spike-p0-8-route start",
 		"spike:judge": "pnpm --filter @auto-qa/spike-p0-8-judge start",
+		"spike:e2e": "pnpm --filter @auto-qa/spike-p0-8-e2e start",
 		"figma:build": "pnpm --filter @auto-qa/figma-plugin build",
 		"check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
 		"db:up": "docker compose up -d",

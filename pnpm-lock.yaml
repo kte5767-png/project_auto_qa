@@ -259,6 +259,34 @@ importers:
         specifier: ^4.23.15
         version: 4.23.15
 
+  spikes/p0-8-e2e:
+    dependencies:
+      '@auto-qa/browser':
+        specifier: workspace:*
+        version: link:../../packages/browser
+      '@auto-qa/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@auto-qa/figma':
+        specifier: workspace:*
+        version: link:../../packages/figma
+      '@auto-qa/focus':
+        specifier: workspace:*
+        version: link:../../packages/focus
+      '@auto-qa/judge':
+        specifier: workspace:*
+        version: link:../../packages/judge
+      '@auto-qa/planner':
+        specifier: workspace:*
+        version: link:../../packages/planner
+      '@auto-qa/spec':
+        specifier: workspace:*
+        version: link:../../packages/spec
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
   spikes/p0-8-judge:
     dependencies:
       '@auto-qa/judge':

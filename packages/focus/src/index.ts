@@ -7,3 +7,5 @@ export { DEFAULT_DETECT_OPTIONS, detectFocusAdapters } from './detect';
 export type { StyleChange, StyleDiffPick } from './styleDiff';
 export { colorLuminance, diffStyles, emphasisScore, pickByStyleDiff, transformScale } from './styleDiff';
 export { commonAncestor, depth, isAncestor, isSelfOrAncestor } from './paths';
+export type { ObserveOptions, ObserveTarget, Observation, ObservedFocus, ObservedTarget } from './observe';
+export { DEFAULT_OBSERVE_OPTIONS, observeScript, observeTargets } from './observe';

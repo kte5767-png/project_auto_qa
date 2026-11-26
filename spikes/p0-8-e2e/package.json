@@ -1,0 +1,23 @@
+{
+	"name": "@auto-qa/spike-p0-8-e2e",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-8 브라우저 E2E 스파이크: 앱을 리모컨 키로 조작하며 화면설계서 이동 지도로 계산한 기대 포커스와 코드 판정을 한 번에 확인 (D-036, D-037)",
+	"scripts": {
+		"start": "tsx run.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/browser": "workspace:*",
+		"@auto-qa/core": "workspace:*",
+		"@auto-qa/figma": "workspace:*",
+		"@auto-qa/focus": "workspace:*",
+		"@auto-qa/judge": "workspace:*",
+		"@auto-qa/planner": "workspace:*",
+		"@auto-qa/spec": "workspace:*"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}

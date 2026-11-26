@@ -1,0 +1,127 @@
+{
+	"format": "auto-qa/e2e-scenario",
+	"version": 1,
+	"name": "샘플 TV 앱 — 검색 화면 간단 점검",
+	"url": "http://localhost:5173/",
+	"focusSelector": null,
+	"elements": {
+		"GNB": {
+			"selector": ".gnb",
+			"names": ["GNB", "메뉴"]
+		},
+		"GNB 검색": {
+			"selector": ".gnb-item",
+			"textIncludes": "Search"
+		},
+		"뒤로 버튼": {
+			"selector": ".search-back"
+		},
+		"검색창": {
+			"selector": ".search-field"
+		},
+		"추천 검색어 제목": {
+			"selector": ".search h2.search-section-title:first-of-type"
+		},
+		"추천 검색어": {
+			"selector": ".search-chip"
+		},
+		"Travel Now": {
+			"selector": ".search-card"
+		}
+	},
+	"entry": [
+		{
+			"waitFocus": true
+		},
+		{
+			"press": "LEFT",
+			"until": "GNB 검색",
+			"max": 3,
+			"else": "DOWN"
+		},
+		{
+			"press": "OK"
+		},
+		{
+			"waitFor": "검색창"
+		}
+	],
+	"steps": [
+		{
+			"id": "1",
+			"title": "검색 진입 — 기본 포커스",
+			"keys": [],
+			"expected": "Search field에 커서 제공, 추천 검색어 타이틀 노출",
+			"checks": [
+				{
+					"focus": "검색창",
+					"clause": "진입 시 기본 포커스: 검색창"
+				},
+				{
+					"present": "추천 검색어 제목",
+					"clause": "추천 검색어 타이틀 노출 (글자가 있는지만)"
+				},
+				{
+					"text": "검색창",
+					"equals": "Search your destination or interest.",
+					"clause": "플레이스홀더 문구 (사람이 정확히 비교로 지정)"
+				},
+				{
+					"unchecked": "초기엔 Admin에서 수동 편성, 이후 인기 검색어 Top 5"
+				}
+			]
+		},
+		{
+			"id": "2",
+			"title": "▼ → 추천 검색어",
+			"keys": ["DOWN"],
+			"expected": "[▼]: 추천 검색어 좌측 첫 번째 항목으로 이동 / 추천 키워드 최대 5개까지 표시",
+			"checks": [
+				{
+					"focus": "추천 검색어",
+					"clause": "추천 검색어 영역으로 이동 (샘플 앱은 가장 가까운 3번째 항목으로 들어감)"
+				},
+				{
+					"count": "추천 검색어",
+					"max": 5,
+					"clause": "추천 키워드 최대 5개까지 표시"
+				}
+			]
+		},
+		{
+			"id": "3",
+			"title": "▶ → 다음 항목",
+			"keys": ["RIGHT"],
+			"expected": "[►]: 다음 항목으로 이동",
+			"checks": [
+				{
+					"focus": "추천 검색어",
+					"item": 3,
+					"clause": "같은 목록 다음 항목 (3번째 → 4번째)"
+				}
+			]
+		},
+		{
+			"id": "4",
+			"title": "▲ → 검색창",
+			"keys": ["UP"],
+			"expected": "[▲]: Search field 버튼 포커스",
+			"checks": [
+				{
+					"focus": "검색창"
+				}
+			]
+		},
+		{
+			"id": "5",
+			"title": "Back → 홈 GNB Search",
+			"keys": ["BACK"],
+			"expected": "Back 후 홈 화면, GNB Search 포커스",
+			"checks": [
+				{
+					"focus": "GNB 검색"
+				}
+			]
+		}
+	]
+}
