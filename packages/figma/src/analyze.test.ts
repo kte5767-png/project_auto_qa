@@ -4,7 +4,7 @@ import { ExportFormatError, parseExport } from './exportFormat';
 import { estimateFocus } from './focus';
 import { normalizeFrame } from './normalize';
 import { findRepeatGroups, multisetJaccard, multisetOverlap } from './repeat';
-import { IMAGE, WHITE, node, sampleExport, sampleHomeFrame, sampleSpecFrame, solid } from './testing';
+import { IMAGE, WHITE, node, sampleExport, sampleHomeFrame, sampleSpecFrame, solid, text } from './testing';
 import type { ExportedNode } from './exportFormat';
 
 const analysis = analyzeFrame(sampleHomeFrame());
@@ -74,8 +74,8 @@ describe('findRepeatGroups', () => {
 				{ x: 0, y: 0, width: 400, height: 225 },
 				{
 					children: [
-						node('RECTANGLE', { x: 0, y: 0, width: 400, height: 225 }),
-						node('TEXT', { x: 0, y: 0, width: 100, height: 20 }),
+						node('RECTANGLE', { x: 0, y: 0, width: 400, height: 225 }, { fills: [IMAGE] }),
+						text('Title', { x: 0, y: 200, width: 100, height: 20 }),
 						...(extra
 							? [node('RECTANGLE', { x: 0, y: 0, width: 400, height: 225 }, { strokes: [WHITE] })]
 							: [])
@@ -99,11 +99,11 @@ describe('findRepeatGroups', () => {
 			{ x: 0, y: 0, width: 400, height: 225 },
 			{
 				children: [
-					node('TEXT', { x: 0, y: 0, width: 1, height: 1 }),
-					node('TEXT', { x: 0, y: 0, width: 1, height: 1 }),
-					node('TEXT', { x: 0, y: 0, width: 1, height: 1 }),
-					node('RECTANGLE', { x: 0, y: 0, width: 1, height: 1 }),
-					node('ELLIPSE', { x: 0, y: 0, width: 1, height: 1 })
+					text('A', { x: 0, y: 0, width: 10, height: 10 }),
+					text('B', { x: 0, y: 20, width: 10, height: 10 }),
+					text('C', { x: 0, y: 40, width: 10, height: 10 }),
+					node('RECTANGLE', { x: 0, y: 0, width: 50, height: 50 }, { fills: [solid(1, 0, 0)] }),
+					node('ELLIPSE', { x: 60, y: 0, width: 50, height: 50 }, { fills: [solid(0, 1, 0)] })
 				]
 			}
 		);
@@ -188,6 +188,112 @@ describe('estimateFocus', () => {
 		const est = estimateFocus(f, findRepeatGroups(f));
 		expect(est.primary?.memberId).toBe('dim2');
 		expect(est.primary?.evidence[0]).toContain('덮개 레이어 없음: "dim"');
+	});
+
+	it('포커스 카드만 상자로 한 번 더 감싸고 안쪽을 키운 구조도 같은 묶음으로 보고 포커스로 찾는다', () => {
+		// 실제 GUI 파일과 같은 모양: 보통 카드는 GROUP > (순번, GROUP > (제목 FRAME, 이미지 GROUP)),
+		// 포커스 카드는 GROUP > (순번, FRAME > GROUP(1.1배) > (제목, 이미지 + 테두리)), 마지막 카드는 GROUP 대신 FRAME
+		const item = (i: number) => {
+			const x = i * 532;
+			const focused = i === 0;
+			const img = focused
+				? { x: x + 72, y: -11, width: 440, height: 248 }
+				: { x: x + 92, y: 0, width: 400, height: 225 };
+			const card = node(
+				'GROUP',
+				focused ? { x: x + 72, y: -11, width: 440, height: 286 } : { x: x + 92, y: 0, width: 400, height: 275 },
+				{
+					children: [
+						node(
+							'FRAME',
+							{ x: x + 92, y: 243, width: 400, height: 32 },
+							{
+								children: [text('Sample place', { x: x + 92, y: 243, width: 138 + i * 10, height: 32 })]
+							}
+						),
+						node('GROUP', img, {
+							children: [
+								node('RECTANGLE', img, { fills: [IMAGE] }),
+								...(focused
+									? [
+											node('RECTANGLE', img, {
+												name: 'Line',
+												strokes: [solid(0.9, 0.9, 0.9)],
+												strokeWeight: 3
+											})
+										]
+									: [])
+							]
+						})
+					]
+				}
+			);
+			return node(
+				i === 4 ? 'FRAME' : 'GROUP',
+				{ x, y: 0, width: 492, height: 275 },
+				{
+					id: `wrap${i}`,
+					children: [
+						text(String(i + 1), { x, y: 104, width: 83, height: 121 }, { size: 96 }),
+						focused
+							? node('FRAME', { x: x + 92, y: 0, width: 400, height: 275 }, { children: [card] })
+							: card
+					]
+				}
+			);
+		};
+		const f = normalizeFrame({
+			pageId: 'p',
+			pageName: 'p',
+			image: null,
+			node: node('FRAME', { x: 0, y: 0, width: 1920, height: 1080 }, { children: [0, 1, 2, 3, 4].map(item) })
+		});
+		const groups = findRepeatGroups(f);
+		expect(groups.find((g) => g.memberIds.includes('wrap0'))?.memberIds).toHaveLength(5);
+		const est = estimateFocus(f, groups);
+		expect(est.primary?.memberId).toBe('wrap0');
+		expect(est.primary?.style).toMatchObject({ scale: { x: 1.1, y: 1.102 }, border: { weight: 3 } });
+		expect(est.candidates).toHaveLength(1);
+	});
+
+	it('글자 길이·아이콘 모양 차이는 확대로 보지 않고, 덮는 색 칠 레이어 추가는 배경 강조로 본다', () => {
+		const item = (i: number, title: string, iconWidth: number, highlight: boolean) =>
+			node(
+				'FRAME',
+				{ x: i * 300, y: 0, width: 280, height: 80 },
+				{
+					id: `it${i}`,
+					children: [
+						...(highlight
+							? [
+									node(
+										'RECTANGLE',
+										{ x: i * 300, y: 0, width: 280, height: 80 },
+										{ name: 'highlight', fills: [solid(0, 0.5, 0.5)] }
+									)
+								]
+							: []),
+						node('VECTOR', { x: i * 300 + 10, y: 20, width: iconWidth, height: 40 }, { fills: [WHITE] }),
+						text(title, { x: i * 300 + 60, y: 20, width: title.length * 12, height: 40 })
+					]
+				}
+			);
+		const items = [
+			item(0, 'Home', 30, true),
+			item(1, 'Search for places', 40, false),
+			item(2, 'My', 24, false),
+			item(3, 'Settings', 36, false)
+		];
+		const f = normalizeFrame({
+			pageId: 'p',
+			pageName: 'p',
+			image: null,
+			node: node('FRAME', { x: 0, y: 0, width: 1920, height: 1080 }, { children: items })
+		});
+		const est = estimateFocus(f, findRepeatGroups(f));
+		expect(est.candidates.map((c) => c.memberId)).toEqual(['it0']);
+		expect(est.primary?.evidence).toEqual(['배경 레이어 추가: "highlight" (#008080)']);
+		expect(est.primary?.style.scale).toBeNull();
 	});
 
 	it('GUI가 아닌 프레임은 포커스를 추정하지 않는다', () => {
