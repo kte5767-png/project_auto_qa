@@ -1,0 +1,19 @@
+{
+	"name": "@auto-qa/spike-p0-8-route",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-8 경로 계산 스파이크: 화면설계서 키 동작 해석(이동 지도) 정확도와 콜아웃 사이 경로를 실제 내보내기로 확인 (D-036)",
+	"scripts": {
+		"start": "tsx run.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/figma": "workspace:*",
+		"@auto-qa/planner": "workspace:*",
+		"@auto-qa/spec": "workspace:*"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}

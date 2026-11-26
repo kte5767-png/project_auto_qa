@@ -1,0 +1,18 @@
+{
+	"name": "@auto-qa/planner",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "TC 실행 계획: 화면설계서 키 동작으로 이동 지도를 만들고 목표까지 경로를 코드로 계산한다 (D-036)",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/core": "workspace:*",
+		"@auto-qa/figma": "workspace:*",
+		"@auto-qa/spec": "workspace:*"
+	}
+}
