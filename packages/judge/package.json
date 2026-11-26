@@ -1,0 +1,16 @@
+{
+	"name": "@auto-qa/judge",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "TC 판정: 기대 결과를 조건으로 나누고 판정 방법(코드·AI·확인 불가)을 정해, 조건 결과를 단계 판정·설명으로 모은다 (D-036, D-037)",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/spec": "workspace:*"
+	}
+}
