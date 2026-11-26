@@ -20,6 +20,8 @@
 		"spike:focus": "pnpm --filter @auto-qa/spike-p0-2-focus start",
 		"spike:device": "pnpm --filter @auto-qa/spike-p0-6-device start",
 		"spike:tc": "pnpm --filter @auto-qa/spike-p0-7-tc start",
+		"spike:figma": "pnpm --filter @auto-qa/spike-p0-5-figma start",
+		"figma:build": "pnpm --filter @auto-qa/figma-plugin build",
 		"check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
 		"db:up": "docker compose up -d",
 		"db:down": "docker compose down"

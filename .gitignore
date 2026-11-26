@@ -10,6 +10,9 @@ coverage/
 
 # 테스트 산출물
 spikes/*/out/
+
+# Figma 플러그인 내보내기 파일 (디자인 내용이 들어 있음)
+*-auto-qa-*.json
 playwright-report/
 test-results/
 

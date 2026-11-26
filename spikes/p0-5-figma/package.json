@@ -1,0 +1,17 @@
+{
+	"name": "@auto-qa/spike-p0-5-figma",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-5 Figma 내보내기 스파이크: 플러그인 JSON → 정규화·반복 묶음·포커스 추정 → PNG 위에 겹친 리포트",
+	"scripts": {
+		"start": "tsx run.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/figma": "workspace:*"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}

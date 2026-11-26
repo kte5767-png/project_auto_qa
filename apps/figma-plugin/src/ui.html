@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8" />
+		<style>
+			body {
+				font:
+					12px/1.5 Inter,
+					system-ui,
+					sans-serif;
+				margin: 12px;
+				color: var(--figma-color-text, #222);
+				background: var(--figma-color-bg, #fff);
+			}
+			h1 {
+				font-size: 13px;
+				margin: 0 0 8px;
+			}
+			ul {
+				max-height: 180px;
+				overflow: auto;
+				padding-left: 18px;
+				margin: 4px 0 12px;
+			}
+			label {
+				display: block;
+				margin: 6px 0;
+			}
+			button {
+				width: 100%;
+				padding: 8px;
+				margin-top: 8px;
+				border: 0;
+				border-radius: 6px;
+				background: var(--figma-color-bg-brand, #0d99ff);
+				color: var(--figma-color-text-onbrand, #fff);
+				font-weight: 600;
+			}
+			button:disabled {
+				opacity: 0.5;
+			}
+			.note {
+				color: var(--figma-color-text-secondary, #666);
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Auto QA 내보내기</h1>
+		<p id="summary">프레임을 찾는 중…</p>
+		<ul id="frames"></ul>
+		<label
+			>PNG 배율
+			<select id="scale">
+				<option value="1" selected>1x</option>
+				<option value="0.5">0.5x</option>
+				<option value="2">2x</option>
+			</select></label
+		>
+		<label><input id="images" type="checkbox" checked /> 프레임 PNG 포함</label>
+		<button id="export" disabled>JSON으로 내보내기</button>
+		<p id="status" class="note">파일은 이 PC에만 저장됩니다. 외부로 보내지 않습니다.</p>
+		<!-- SCRIPT -->
+	</body>
+</html>
