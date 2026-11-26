@@ -30,3 +30,5 @@ export {
 	classifyTexts,
 	findAnchors
 } from './analyze';
+export type { Visual, VisualClass, VisualMatch } from './visual';
+export { matchVisuals, visualClass, visualCounts, visuals } from './visual';

@@ -1,7 +1,9 @@
 import { area } from '@auto-qa/core';
+import type { Rect } from '@auto-qa/core';
 import type { ColorSummary, FigmaElement, NormalizedFrame } from './normalize';
 import { elementById } from './normalize';
 import type { RepeatGroup } from './repeat';
+import { matchVisuals, visuals } from './visual';
 
 /**
  * 형제 대비 포커스 요소 추정 (설계 7.3, D-010). GUI 프레임은 포커스 상태 스냅샷이고, 포커스는
@@ -22,6 +24,8 @@ export interface FocusOptions {
 		otherLayer: number;
 		/** 다른 멤버에는 있는 큰 레이어(예: 어둡게 덮는 dim)가 이 멤버에만 없음 */
 		removedLayer: number;
+		/** 멤버를 덮는 큰 색 칠 레이어 추가 (배경 강조) */
+		fillLayer: number;
 		stroke: number;
 		fill: number;
 		shadow: number;
@@ -38,6 +42,7 @@ export const DEFAULT_FOCUS_OPTIONS: FocusOptions = {
 		borderLayer: 0.4,
 		otherLayer: 0.15,
 		removedLayer: 0.4,
+		fillLayer: 0.35,
 		stroke: 0.35,
 		fill: 0.15,
 		shadow: 0.15,
@@ -70,25 +75,6 @@ export interface FocusEstimate {
 	skipped: { groupId: string; reason: string }[];
 }
 
-/** 멤버 아래 자손을 "종류#같은 종류 안 순번" 경로로 색인 */
-function descendants(frame: NormalizedFrame, member: FigmaElement): Map<string, FigmaElement> {
-	const map = new Map<string, FigmaElement>([['', member]]);
-	const visit = (e: FigmaElement, prefix: string): void => {
-		const seen = new Map<string, number>();
-		for (const id of e.childIds) {
-			const child = elementById(frame, id);
-			if (child === undefined) continue;
-			const n = seen.get(child.type) ?? 0;
-			seen.set(child.type, n + 1);
-			const key = `${prefix}/${child.type}#${n}`;
-			if (!child.hidden) map.set(key, child);
-			visit(child, key);
-		}
-	};
-	visit(member, '');
-	return map;
-}
-
 const sameColor = (a: ColorSummary | null, b: ColorSummary | null): boolean =>
 	(a === null && b === null) || (a !== null && b !== null && a.hex === b.hex && Math.abs(a.alpha - b.alpha) < 0.05);
 
@@ -101,83 +87,80 @@ interface Diff {
 	style: FocusStyle;
 }
 
+const ratio3 = (v: number): number => Math.round(v * 1000) / 1000;
+
+/**
+ * member를 typical과 비교한다. 노드 구조가 아니라 보이는 요소끼리 위치로 짝지어 비교하므로,
+ * 포커스 카드만 한 번 더 감싸져 있거나 GROUP/FRAME이 섞여 있어도 같은 요소를 비교한다.
+ */
 function compare(frame: NormalizedFrame, member: FigmaElement, typical: FigmaElement, options: FocusOptions): Diff {
 	const w = options.weights;
-	const a = descendants(frame, member);
-	const b = descendants(frame, typical);
 	const evidence: string[] = [];
 	const style: FocusStyle = { scale: null, border: null, fill: null, shadow: false };
 	let score = 0;
 	const memberArea = area(member.rect);
+	const typicalArea = area(typical.rect);
+	const { pairs, added, removed } = matchVisuals(visuals(frame, member), visuals(frame, typical), typical.rect);
 
-	const sx = typical.rect.width === 0 ? 1 : member.rect.width / typical.rect.width;
-	const sy = typical.rect.height === 0 ? 1 : member.rect.height / typical.rect.height;
-	if (Math.max(Math.abs(sx - 1), Math.abs(sy - 1)) >= options.scaleThreshold) {
+	// 확대: 멤버 전체 또는 실제로 커진 가장 큰 요소(예: 순번 숫자를 뺀 카드 이미지)
+	const changed = (a: { width: number; height: number }, b: { width: number; height: number }): boolean =>
+		b.width > 0 &&
+		b.height > 0 &&
+		Math.max(Math.abs(a.width / b.width - 1), Math.abs(a.height / b.height - 1)) >= options.scaleThreshold;
+	// 글자 상자는 내용 길이에 따라, 벡터 아이콘은 모양에 따라 크기가 달라지므로 확대 근거로 쓰지 않는다
+	const scaled = pairs
+		.filter((p) => (p.a.cls === 'image' || p.a.cls === 'fill' || p.a.cls === 'stroke') && changed(p.a.rel, p.b.rel))
+		.sort((x, y) => area(y.a.rel) - area(x.a.rel))[0];
+	if (changed(member.rect, typical.rect) || scaled !== undefined) {
 		score += w.scale;
-		style.scale = { x: Math.round(sx * 1000) / 1000, y: Math.round(sy * 1000) / 1000 };
+		const [a, b] = scaled === undefined ? [member.rect, typical.rect] : [scaled.a.rel, scaled.b.rel];
+		style.scale = { x: ratio3(a.width / b.width), y: ratio3(a.height / b.height) };
+		const what = scaled === undefined ? '멤버' : `"${scaled.a.element.name}"`;
+		evidence.push(`${what} ${b.width}×${b.height} → ${a.width}×${a.height} (×${style.scale.x}, ×${style.scale.y})`);
+	}
+
+	const large = (r: Rect, base: number): boolean => base > 0 && area(r) >= base * 0.5;
+	let other = false;
+	let highlight = false;
+	for (const v of added) {
+		const e = v.element;
+		if (v.cls === 'glyph') continue;
+		if (v.cls === 'fill' && large(v.rel, memberArea) && !highlight) {
+			highlight = true;
+			score += w.fillLayer;
+			if (style.fill === null) style.fill = e.style.fill;
+			evidence.push(`배경 레이어 추가: "${e.name}" (${e.style.fill?.hex ?? '?'})`);
+		} else if (v.cls === 'stroke' && large(v.rel, memberArea) && style.border === null) {
+			score += w.borderLayer;
+			style.border = { color: e.style.stroke?.color ?? null, weight: e.style.stroke?.weight ?? null };
+			evidence.push(
+				`테두리 레이어 추가: "${e.name}" (${e.style.stroke?.color?.hex ?? '?'}, ${String(e.style.stroke?.weight ?? '?')}px)`
+			);
+		} else if (!other) {
+			other = true;
+			score += w.otherLayer;
+			evidence.push(`레이어 추가: "${e.name}" (${v.cls})`);
+		}
+	}
+	const cover = removed.find((v) => (v.cls === 'fill' || v.cls === 'image') && large(v.rel, typicalArea));
+	if (cover !== undefined) {
+		score += w.removedLayer;
 		evidence.push(
-			`크기 ${typical.rect.width}×${typical.rect.height} → ${member.rect.width}×${member.rect.height} (×${style.scale.x}, ×${style.scale.y})`
+			`다른 멤버의 덮개 레이어 없음: "${cover.element.name}" (${cover.element.style.fill?.hex ?? cover.cls})`
 		);
 	}
 
-	// 확대는 멤버 전체보다 실제로 커진 가장 큰 자손(예: 순번 숫자를 뺀 카드)의 배율이 기대 포커스 스타일에 가깝다
-	if (style.scale !== null) {
-		let biggest: { e: FigmaElement; t: FigmaElement } | null = null;
-		for (const [key, e] of a) {
-			const t = b.get(key);
-			if (key === '' || t === undefined || t.rect.width === 0 || t.rect.height === 0) continue;
-			const ex = e.rect.width / t.rect.width;
-			const ey = e.rect.height / t.rect.height;
-			if (Math.max(Math.abs(ex - 1), Math.abs(ey - 1)) < options.scaleThreshold) continue;
-			if (biggest === null || area(e.rect) > area(biggest.e.rect)) biggest = { e, t };
+	let text = false;
+	for (const { a: va, b: vb } of pairs) {
+		const e = va.element;
+		const t = vb.element;
+		const big = large(va.rel, memberArea) || e === member;
+		if (strokeKey(e) !== strokeKey(t) && e.style.stroke !== null && big && style.border === null) {
+			score += w.stroke;
+			style.border = { color: e.style.stroke.color, weight: e.style.stroke.weight };
+			evidence.push(`테두리 ${strokeKey(t)} → ${strokeKey(e)} ("${e.name}")`);
 		}
-		if (biggest !== null) {
-			const { e, t } = biggest;
-			style.scale = {
-				x: Math.round((e.rect.width / t.rect.width) * 1000) / 1000,
-				y: Math.round((e.rect.height / t.rect.height) * 1000) / 1000
-			};
-			evidence.push(
-				`안쪽 "${e.name}" ${t.rect.width}×${t.rect.height} → ${e.rect.width}×${e.rect.height} (×${style.scale.x}, ×${style.scale.y})`
-			);
-		}
-	}
-
-	let otherLayers = 0;
-	for (const [key, e] of a) {
-		const t = b.get(key);
-		const large = memberArea > 0 && area(e.rect) >= memberArea * 0.5;
-		if (t === undefined) {
-			const borderLike =
-				(e.style.stroke !== null || e.type === 'LINE') &&
-				(e.style.fill === null || e.style.fill.alpha === 0) &&
-				(large || e.type === 'LINE');
-			if (borderLike && style.border === null) {
-				score += w.borderLayer;
-				style.border = { color: e.style.stroke?.color ?? null, weight: e.style.stroke?.weight ?? null };
-				evidence.push(
-					`테두리 레이어 추가: "${e.name}" (${e.style.stroke?.color?.hex ?? '?'}, ${String(e.style.stroke?.weight ?? '?')}px)`
-				);
-			} else if (otherLayers === 0) {
-				otherLayers++;
-				score += w.otherLayer;
-				evidence.push(`레이어 추가: "${e.name}" (${e.type})`);
-			}
-			continue;
-		}
-		if (strokeKey(e) !== strokeKey(t) && e.style.stroke !== null && (large || key === '')) {
-			if (style.border === null) {
-				score += w.stroke;
-				style.border = { color: e.style.stroke.color, weight: e.style.stroke.weight };
-				evidence.push(`테두리 ${strokeKey(t)} → ${strokeKey(e)} ("${e.name}")`);
-			}
-		}
-		if (
-			(e.kind === 'container' || e.kind === 'shape') &&
-			(large || key === '') &&
-			!sameColor(e.style.fill, t.style.fill) &&
-			style.fill === null
-		) {
+		if (va.cls === 'fill' && big && !sameColor(e.style.fill, t.style.fill) && style.fill === null) {
 			score += w.fill;
 			style.fill = e.style.fill;
 			evidence.push(`배경 ${t.style.fill?.hex ?? '없음'} → ${e.style.fill?.hex ?? '없음'} ("${e.name}")`);
@@ -188,26 +171,18 @@ function compare(frame: NormalizedFrame, member: FigmaElement, typical: FigmaEle
 			evidence.push(`그림자 추가 ("${e.name}")`);
 		}
 		if (
-			e.kind === 'text' &&
-			t.kind === 'text' &&
-			(!sameColor(e.text?.color ?? null, t.text?.color ?? null) || e.text?.fontWeight !== t.text?.fontWeight) &&
-			!evidence.some((x) => x.startsWith('글자'))
+			va.cls === 'text' &&
+			!text &&
+			(!sameColor(e.text?.color ?? null, t.text?.color ?? null) || e.text?.fontWeight !== t.text?.fontWeight)
 		) {
+			text = true;
 			score += w.text;
 			evidence.push(
-				`글자 ${t.text?.color?.hex ?? '?'}/${t.text?.fontWeight ?? '?'} → ${e.text?.color?.hex ?? '?'}/${e.text?.fontWeight ?? '?'}`
+				`글자 ${t.text?.color?.hex ?? '?'}/${t.text?.fontWeight ?? '?'} → ${e.text?.color?.hex ?? '?'}/${e.text?.fontWeight ?? '?'} ("${e.name}")`
 			);
 		}
 	}
-	for (const [key, t] of b) {
-		if (a.has(key) || key === '') continue;
-		if (memberArea > 0 && area(t.rect) >= area(typical.rect) * 0.5) {
-			score += w.removedLayer;
-			evidence.push(`다른 멤버의 덮개 레이어 없음: "${t.name}" (${t.style.fill?.hex ?? t.type})`);
-			break;
-		}
-	}
-	return { score: Math.min(1, Math.round(score * 1000) / 1000), evidence, style };
+	return { score: Math.min(1, ratio3(score)), evidence, style };
 }
 
 function isAncestor(frame: NormalizedFrame, ancestorId: string, id: string): boolean {
