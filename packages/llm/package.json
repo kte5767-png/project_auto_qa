@@ -1,0 +1,14 @@
+{
+	"name": "@auto-qa/llm",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "로컬 LLM 게이트웨이 (Ollama, 외부 AI API 금지 D-026): JSON 스키마 출력 검증, 모델 비교(P0-8)",
+	"exports": {
+		".": "./src/index.ts",
+		"./testing": "./src/testing.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	}
+}

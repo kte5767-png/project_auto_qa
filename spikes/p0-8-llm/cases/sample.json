@@ -1,0 +1,595 @@
+{
+	"format": "auto-qa-llm-cases",
+	"version": 1,
+	"name": "샘플 (합성 — 비교 도구 확인용)",
+	"cases": [
+		{
+			"id": "j-text-01",
+			"task": "judge",
+			"title": "포커스 위치 맞음",
+			"expected": "Search field 영역에 포커스가 위치한다",
+			"observation": {
+				"screen": "검색",
+				"focus": "① Search field (검색 입력창)",
+				"texts": ["Search your destination or interest.", "Recommended Keywords"]
+			},
+			"answer": {
+				"verdict": "pass"
+			}
+		},
+		{
+			"id": "j-text-02",
+			"task": "judge",
+			"title": "포커스 위치 다름",
+			"expected": "VKB(가상 키보드)의 첫 번째 키에 포커스가 위치한다",
+			"observation": {
+				"screen": "검색",
+				"focus": "① Search field (검색 입력창)",
+				"note": "가상 키보드는 화면 아래에 표시되어 있음"
+			},
+			"answer": {
+				"verdict": "fail"
+			}
+		},
+		{
+			"id": "j-text-03",
+			"task": "judge",
+			"title": "안내 문구 노출",
+			"expected": "검색 결과가 없으면 'There are no results' 문구와 추천 키워드가 노출된다",
+			"observation": {
+				"screen": "검색 결과",
+				"focus": "① Search field",
+				"texts": [
+					"There are no results",
+					"How about these recommendations?",
+					"Walking in Bali",
+					"Driving in Hong Kong"
+				]
+			},
+			"answer": {
+				"verdict": "pass"
+			}
+		},
+		{
+			"id": "j-text-04",
+			"task": "judge",
+			"title": "플레이스홀더 문구 다름",
+			"expected": "검색 필드에 'Search your destination or interest.' 문구가 노출된다",
+			"observation": {
+				"screen": "검색",
+				"focus": "① Search field",
+				"texts": ["Search destination or interest"]
+			},
+			"answer": {
+				"verdict": "fail"
+			}
+		},
+		{
+			"id": "j-text-05",
+			"task": "judge",
+			"title": "최대 개수 초과",
+			"expected": "최근 검색어는 최대 5개까지 노출된다",
+			"observation": {
+				"screen": "검색",
+				"texts": ["Bali", "Summer Vacation", "Christmas Trip", "OTT", "Healing", "Paris"],
+				"note": "보이는 글자는 최근 검색어 영역의 글자다"
+			},
+			"answer": {
+				"verdict": "fail"
+			}
+		},
+		{
+			"id": "j-text-06",
+			"task": "judge",
+			"title": "Back 후 화면 그대로",
+			"expected": "Back 키를 누르면 Home 화면으로 이동한다",
+			"observation": {
+				"screen": "검색",
+				"focus": "① Search field",
+				"note": "Back 키를 누른 뒤 관찰한 화면"
+			},
+			"answer": {
+				"verdict": "fail"
+			}
+		},
+		{
+			"id": "j-text-07",
+			"task": "judge",
+			"title": "포커스 이동 맞음",
+			"expected": "포커스가 Top 10 두 번째 카드로 이동한다",
+			"observation": {
+				"screen": "홈",
+				"focus": "Top 10 2번 카드",
+				"note": "▶ 키를 누른 뒤 관찰"
+			},
+			"answer": {
+				"verdict": "pass"
+			}
+		},
+		{
+			"id": "j-text-08",
+			"task": "judge",
+			"title": "소리는 관찰 불가",
+			"expected": "포커스가 이동할 때 효과음이 재생된다",
+			"observation": {
+				"screen": "홈",
+				"focus": "Top 10 2번 카드",
+				"note": "화면 관찰만 있음 (소리는 수집하지 않음)"
+			},
+			"answer": {
+				"verdict": "uncertain"
+			}
+		},
+		{
+			"id": "j-text-09",
+			"task": "judge",
+			"title": "애니메이션은 관찰 불가",
+			"expected": "카드에 포커스가 가면 0.3초 동안 부드럽게 확대된다",
+			"observation": {
+				"screen": "홈",
+				"focus": "Top 10 1번 카드",
+				"note": "키 입력 후 안정된 정지 화면 한 장만 있음"
+			},
+			"answer": {
+				"verdict": "uncertain"
+			}
+		},
+		{
+			"id": "j-img-01",
+			"task": "judge",
+			"title": "포커스 테두리 있음 (이미지)",
+			"expected": "포커스된 카드에 흰색 테두리가 보인다",
+			"observation": {
+				"screen": "홈",
+				"focus": "Top 10 1번 카드",
+				"note": "포커스된 카드 영역만 잘라낸 이미지로 판단"
+			},
+			"answer": {
+				"verdict": "pass"
+			},
+			"images": ["images/card-focus-ok.png"]
+		},
+		{
+			"id": "j-img-02",
+			"task": "judge",
+			"title": "포커스 테두리 없음 (이미지)",
+			"expected": "포커스된 카드에 흰색 테두리가 보인다",
+			"observation": {
+				"screen": "홈",
+				"focus": "Top 10 1번 카드",
+				"note": "포커스된 카드 영역만 잘라낸 이미지로 판단"
+			},
+			"answer": {
+				"verdict": "fail"
+			},
+			"images": ["images/card-focus-no-border.png"]
+		},
+		{
+			"id": "j-img-03",
+			"task": "judge",
+			"title": "플레이스홀더 맞음 (이미지)",
+			"expected": "검색 필드에 'Search your destination or interest.' 문구가 보인다",
+			"observation": {
+				"screen": "검색",
+				"note": "검색 필드 영역만 잘라낸 이미지로 판단"
+			},
+			"answer": {
+				"verdict": "pass"
+			},
+			"images": ["images/search-placeholder-ok.png"]
+		},
+		{
+			"id": "j-img-04",
+			"task": "judge",
+			"title": "플레이스홀더 다름 (이미지)",
+			"expected": "검색 필드에 'Search your destination or interest.' 문구가 보인다",
+			"observation": {
+				"screen": "검색",
+				"note": "검색 필드 영역만 잘라낸 이미지로 판단"
+			},
+			"answer": {
+				"verdict": "fail"
+			},
+			"images": ["images/search-placeholder-wrong.png"]
+		},
+		{
+			"id": "j-img-05",
+			"task": "judge",
+			"title": "설명 문구 다 보임 (이미지)",
+			"expected": "프로모 카드의 설명 문구(제목 아래 작은 글자)가 3줄로 모두 보이고 말줄임(…)이 없다",
+			"observation": {
+				"screen": "홈",
+				"note": "프로모 카드 영역만 잘라낸 이미지로 판단. 제목 줄은 판정 대상이 아님"
+			},
+			"answer": {
+				"verdict": "pass"
+			},
+			"images": ["images/promo-description-ok.png"]
+		},
+		{
+			"id": "j-img-06",
+			"task": "judge",
+			"title": "설명 문구 잘림 (이미지)",
+			"expected": "프로모 카드의 설명 문구(제목 아래 작은 글자)가 3줄로 모두 보이고 말줄임(…)이 없다",
+			"observation": {
+				"screen": "홈",
+				"note": "프로모 카드 영역만 잘라낸 이미지로 판단. 제목 줄은 판정 대상이 아님"
+			},
+			"answer": {
+				"verdict": "fail"
+			},
+			"images": ["images/promo-description-cut.png"]
+		},
+		{
+			"id": "p-01",
+			"task": "plan",
+			"title": "한 번 이동",
+			"step": "검색 필드에서 ▼ 키를 누른다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["DOWN"]
+			}
+		},
+		{
+			"id": "p-02",
+			"task": "plan",
+			"title": "두 단계 이동",
+			"step": "추천 키워드 두 번째 항목으로 이동한다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["DOWN", "RIGHT"]
+			}
+		},
+		{
+			"id": "p-03",
+			"task": "plan",
+			"title": "이동 후 선택",
+			"step": "설정 팝업을 연다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["RIGHT", "OK"]
+			}
+		},
+		{
+			"id": "p-04",
+			"task": "plan",
+			"title": "세 단계",
+			"step": "인기 콘텐츠 첫 카드의 상세 화면으로 들어간다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["DOWN", "DOWN", "OK"]
+			}
+		},
+		{
+			"id": "p-05",
+			"task": "plan",
+			"title": "되돌아가기",
+			"step": "검색 필드로 돌아간다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "② 추천 키워드 첫 항목",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["UP"]
+			}
+		},
+		{
+			"id": "p-06",
+			"task": "plan",
+			"title": "Back",
+			"step": "이전 화면으로 돌아간다 (Back 키)",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "③ 인기 콘텐츠 첫 카드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["BACK"]
+			}
+		},
+		{
+			"id": "p-07",
+			"task": "plan",
+			"title": "여러 번 오른쪽",
+			"step": "추천 키워드 세 번째 항목으로 검색한다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드",
+						"keys": {
+							"down": "② 추천 키워드 첫 항목으로 이동",
+							"right": "④ 설정 버튼으로 이동",
+							"ok": "키보드 열기"
+						}
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"keys": {
+							"up": "① 검색 필드로 이동",
+							"left": "이전 키워드로 이동",
+							"right": "다음 키워드로 이동",
+							"down": "③ 인기 콘텐츠 첫 카드로 이동",
+							"ok": "선택한 키워드로 검색"
+						}
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"keys": {
+							"up": "② 추천 키워드로 이동",
+							"left": "이전 카드로 이동",
+							"right": "다음 카드로 이동",
+							"ok": "상세 화면으로 이동"
+						}
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼",
+						"keys": {
+							"left": "① 검색 필드로 이동",
+							"ok": "설정 팝업 열기"
+						}
+					}
+				]
+			},
+			"answer": {
+				"keys": ["DOWN", "RIGHT", "RIGHT", "OK"]
+			}
+		}
+	]
+}

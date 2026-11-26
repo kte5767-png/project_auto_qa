@@ -1,0 +1,22 @@
+{
+	"name": "@auto-qa/spike-p0-8-llm",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "P0-8 로컬 LLM 비교 스파이크: 같은 판정·계획 케이스를 Ollama 모델들에 돌려 정확도·확신 오답·반복 일치·속도·메모리 비교",
+	"scripts": {
+		"start": "tsx run.ts",
+		"images": "tsx make-images.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@auto-qa/core": "workspace:*",
+		"@auto-qa/llm": "workspace:*",
+		"@auto-qa/sample-tv-app": "workspace:*",
+		"playwright-core": "^1.65.1",
+		"vite": "^8.3.8"
+	},
+	"devDependencies": {
+		"tsx": "^4.23.15"
+	}
+}
