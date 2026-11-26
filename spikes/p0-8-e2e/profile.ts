@@ -61,6 +61,30 @@ export interface ResetDef {
 	closePopupKey?: RemoteKey;
 	/** 되돌리기 중 누르지 않는 키 (기본 OK) */
 	forbidden?: RemoteKey[];
+	/**
+	 * BACK으로 닫히지 않는 팝업에서 고를 버튼 글자 (기본 cancel·취소·아니오·no·close·닫기). 이 글자 버튼에서만 OK를 누른다.
+	 * 나가기 글자(exitWords)가 함께 있으면 누르지 않는다
+	 */
+	cancelWords?: string[];
+	exitWords?: string[];
+}
+
+export const DEFAULT_CANCEL_WORDS = ['cancel', '취소', '아니오', '아니요', 'no', 'close', '닫기'];
+export const DEFAULT_EXIT_WORDS = ['exit', 'quit', '나가기', '종료', '앱 종료'];
+
+/** 버튼 글자가 취소 버튼인가 (나가기 글자가 섞이면 아님) */
+export function isCancelText(
+	text: string,
+	cancelWords = DEFAULT_CANCEL_WORDS,
+	exitWords = DEFAULT_EXIT_WORDS
+): boolean {
+	const t = text
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N} ]/gu, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+	const has = (w: string): boolean => new RegExp(`(^| )${w.toLowerCase()}( |$)`, 'u').test(t);
+	return t !== '' && cancelWords.some(has) && !exitWords.some(has);
 }
 
 /** 프로필 → 화면 지문 옵션·되돌리기 규칙. 영역은 `exit` 키가 있는 공통 요소 */
@@ -68,6 +92,8 @@ export function resetConfig(profile: AppProfile): {
 	fingerprint: Partial<FingerprintOptions>;
 	rules: ResetRules;
 	match: HomeMatchOptions;
+	cancelWords: string[];
+	exitWords: string[];
 } {
 	const r = profile.reset ?? {};
 	const regions: Record<string, string> = {};
@@ -91,7 +117,9 @@ export function resetConfig(profile: AppProfile): {
 			...(r.closePopupKey === undefined ? {} : { closePopupKey: r.closePopupKey }),
 			...(r.forbidden === undefined ? {} : { forbidden: r.forbidden })
 		},
-		match: { ...DEFAULT_HOME_MATCH, ...(r.minSimilarity === undefined ? {} : { minSimilarity: r.minSimilarity }) }
+		match: { ...DEFAULT_HOME_MATCH, ...(r.minSimilarity === undefined ? {} : { minSimilarity: r.minSimilarity }) },
+		cancelWords: r.cancelWords ?? DEFAULT_CANCEL_WORDS,
+		exitWords: r.exitWords ?? DEFAULT_EXIT_WORDS
 	};
 }
 
