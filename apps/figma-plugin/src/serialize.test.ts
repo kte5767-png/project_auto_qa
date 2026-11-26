@@ -118,12 +118,12 @@ function screen(): Fake {
 			primaryAxisAlignItems: 'CENTER',
 			counterAxisAlignItems: 'CENTER',
 			componentProperties: {
-				State: { type: 'VARIANT', value: 'Focused' },
+				State: { type: 'VARIANT', value: 'Default' },
 				'Label#12:0': { type: 'TEXT', value: 'Watch now' },
 				'Icon#13:1': { type: 'BOOLEAN', value: false }
 			},
 			getMainComponentAsync: async () => ({
-				name: 'State=Focused',
+				name: 'State=Default',
 				parent: { type: 'COMPONENT_SET', name: 'Btn_main' }
 			}),
 			reactions: [
@@ -182,9 +182,9 @@ describe('serializeNode', () => {
 
 		const button = out.children[4];
 		expect(button?.component).toEqual({
-			name: 'State=Focused',
+			name: 'State=Default',
 			setName: 'Btn_main',
-			properties: { State: 'Focused', Label: 'Watch now', Icon: false }
+			properties: { State: 'Default', Label: 'Watch now', Icon: false }
 		});
 		expect(button?.layout).toEqual({
 			mode: 'HORIZONTAL',
@@ -219,7 +219,7 @@ describe('serializeNode', () => {
 		const ctx: SerializeContext = { mixed: MIXED, warnings: [] };
 		const out = await serializeNode(root, ctx);
 		expect(out.children).toHaveLength(6);
-		expect(out.children[4]?.component).toEqual({ name: 'State=Focused', setName: 'Btn_main', properties: {} });
+		expect(out.children[4]?.component).toEqual({ name: 'State=Default', setName: 'Btn_main', properties: {} });
 		expect(out.children[4]?.children[0]?.text?.characters).toBe('Watch now');
 		expect(ctx.warnings).toContainEqual(
 			'btn "Btn_main(New)": componentProperties를 읽지 못해 비워 둠 (in get_componentProperties: Component set for node has existing errors)'

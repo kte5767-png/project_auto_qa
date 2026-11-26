@@ -7,7 +7,7 @@ import { sampleExport, sampleHomeFrame } from '@auto-qa/figma/testing';
 import { extractSpecScreen } from '@auto-qa/spec';
 import type { SpecScreen } from '@auto-qa/spec';
 import { sampleGuiFrame, sampleSpecPage } from '@auto-qa/spec/testing';
-import { linkAll, measure, renderLinks } from './link';
+import { linkAll, measure, measureFocus, renderLinks } from './link';
 import type { FrameSource, Truth } from './link';
 
 /**
@@ -165,7 +165,7 @@ ${
 		: focus === null
 			? '<p class="bad">포커스 요소를 찾지 못함</p>'
 			: `<h3>포커스 추정${s.focus.ambiguous ? ' <span class="bad">(확인 필요: 비슷한 후보 있음)</span>' : ''}</h3>
-<p><b>${esc(focus.memberName)}</b> 점수 ${focus.score} — 기준 멤버 ${esc(elementById(f, focus.typicalId)?.name)}</p>
+<p><b>${esc(focus.memberName)}</b> 점수 ${focus.score} — 근거 ${focus.source} · 기준 ${esc(focus.typicalId === null ? '-' : elementById(f, focus.typicalId)?.name)}</p>
 <ul>${focus.evidence.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
 <p>기대 포커스 스타일: ${esc(JSON.stringify(focus.style))}</p>
 ${
@@ -290,6 +290,11 @@ if (frames.some((f) => f.analysis.kind === 'spec') && frames.some((f) => f.analy
 		for (const w of [...measured.pairs.wrong, ...measured.callouts.wrong]) console.log(`    틀림 ${w}`);
 		if (measured.callouts.unjudged.length > 0)
 			console.log(`    정답 없음: ${measured.callouts.unjudged.join(', ')}`);
+	}
+	if (truth?.focus !== undefined) {
+		const f = measureFocus(frames, truth);
+		console.log(`  GUI 포커스 추정: ${f.correct}/${f.total} (확인 필요 표시 ${f.flagged})`);
+		for (const w of f.wrong) console.log(`    틀림 ${w}`);
 	}
 	console.log(`  → ${join(out, 'report.html')}`);
 }

@@ -19,7 +19,7 @@ export type { ColorSummary, ElementKind, FigmaElement, NormalizedFrame, StyleSum
 export { elementById, isShown, normalizeFrame, rgbaToHex, topPaint } from './normalize';
 export type { RepeatGroup, RepeatOptions } from './repeat';
 export { DEFAULT_REPEAT_OPTIONS, findRepeatGroups, multisetJaccard, multisetOverlap, structureTokens } from './repeat';
-export type { FocusCandidate, FocusEstimate, FocusOptions, FocusStyle } from './focus';
+export type { FocusCandidate, FocusEstimate, FocusOptions, FocusSource, FocusStyle } from './focus';
 export { DEFAULT_FOCUS_OPTIONS, estimateFocus } from './focus';
 export type { AnalyzeOptions, Anchor, FrameAnalysis, FrameKind, TextClass } from './analyze';
 export {
