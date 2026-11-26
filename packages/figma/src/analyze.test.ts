@@ -190,6 +190,72 @@ describe('estimateFocus', () => {
 		expect(est.primary?.evidence[0]).toContain('덮개 레이어 없음: "dim"');
 	});
 
+	it('포커스 카드만 상자로 한 번 더 감싸고 안쪽을 키운 구조도 같은 묶음으로 보고 포커스로 찾는다', () => {
+		// 실제 GUI 파일과 같은 모양: 보통 카드는 GROUP > (순번, GROUP > (제목 FRAME, 이미지 GROUP)),
+		// 포커스 카드는 GROUP > (순번, FRAME > GROUP(1.1배) > (제목, 이미지 + 테두리)), 마지막 카드는 GROUP 대신 FRAME
+		const item = (i: number) => {
+			const x = i * 532;
+			const focused = i === 0;
+			const img = focused
+				? { x: x + 72, y: -11, width: 440, height: 248 }
+				: { x: x + 92, y: 0, width: 400, height: 225 };
+			const card = node(
+				'GROUP',
+				focused ? { x: x + 72, y: -11, width: 440, height: 286 } : { x: x + 92, y: 0, width: 400, height: 275 },
+				{
+					children: [
+						node(
+							'FRAME',
+							{ x: x + 92, y: 243, width: 400, height: 32 },
+							{
+								children: [text('Sample place', { x: x + 92, y: 243, width: 138 + i * 10, height: 32 })]
+							}
+						),
+						node('GROUP', img, {
+							children: [
+								node('RECTANGLE', img, { fills: [IMAGE] }),
+								...(focused
+									? [
+											node('RECTANGLE', img, {
+												name: 'Line',
+												strokes: [solid(0.9, 0.9, 0.9)],
+												strokeWeight: 3
+											})
+										]
+									: [])
+							]
+						})
+					]
+				}
+			);
+			return node(
+				i === 4 ? 'FRAME' : 'GROUP',
+				{ x, y: 0, width: 492, height: 275 },
+				{
+					id: `wrap${i}`,
+					children: [
+						text(String(i + 1), { x, y: 104, width: 83, height: 121 }, { size: 96 }),
+						focused
+							? node('FRAME', { x: x + 92, y: 0, width: 400, height: 275 }, { children: [card] })
+							: card
+					]
+				}
+			);
+		};
+		const f = normalizeFrame({
+			pageId: 'p',
+			pageName: 'p',
+			image: null,
+			node: node('FRAME', { x: 0, y: 0, width: 1920, height: 1080 }, { children: [0, 1, 2, 3, 4].map(item) })
+		});
+		const groups = findRepeatGroups(f);
+		expect(groups.find((g) => g.memberIds.includes('wrap0'))?.memberIds).toHaveLength(5);
+		const est = estimateFocus(f, groups);
+		expect(est.primary?.memberId).toBe('wrap0');
+		expect(est.primary?.style).toMatchObject({ scale: { x: 1.1, y: 1.102 }, border: { weight: 3 } });
+		expect(est.candidates).toHaveLength(1);
+	});
+
 	it('글자 길이·아이콘 모양 차이는 확대로 보지 않고, 덮는 색 칠 레이어 추가는 배경 강조로 본다', () => {
 		const item = (i: number, title: string, iconWidth: number, highlight: boolean) =>
 			node(
