@@ -51,6 +51,7 @@ export interface CallRecord {
 	correct: boolean;
 	partial: number;
 	confidentWrong: boolean;
+	falsePass: boolean;
 	content: string;
 	metrics: ChatMetrics | null;
 	/** 연결·시간 초과 등 호출 자체 실패 */
@@ -172,7 +173,7 @@ export async function compareModels(
 						const result = await client.chat({
 							model,
 							messages: messagesFor(c, lc.images),
-							schema: schemaFor(c.task),
+							schema: schemaFor(c),
 							options: {
 								temperature: options.temperature,
 								seed: options.seed,
@@ -203,6 +204,7 @@ export async function compareModels(
 							correct: false,
 							partial: 0,
 							confidentWrong: false,
+							falsePass: false,
 							content: '',
 							metrics: null,
 							failure: message(e)
@@ -243,8 +245,17 @@ export interface ModelSummary {
 		imageCalls: number;
 		imageAccuracy: number | null;
 		confidentWrong: number;
+		/** 결함을 pass라고 한 수 (D-036 ④) */
+		falsePass: number;
 		uncertain: number;
+		/**
+		 * pass 답의 신뢰도: 맞은 pass 최소값 / 틀린 pass 최대값.
+		 * 틀린 pass 최대값이 맞은 pass 최소값보다 작아야 신뢰도 기준으로 자동 확정을 고려할 수 있다
+		 */
+		passConfidence: { correctMin: number | null; wrongMax: number | null; separable: boolean | null };
 	};
+	/** 목표 고르기 (D-036 ①) */
+	target: { calls: number; exactRate: number | null; calloutRate: number | null; meanPartial: number | null };
 	plan: { calls: number; exactRate: number | null; meanSimilarity: number | null };
 	/** 반복한 케이스 중 모든 반복의 판단이 같은 비율 */
 	consistency: number | null;
@@ -270,6 +281,16 @@ export function summarize(run: ModelRun): ModelSummary {
 	const judge = calls.filter((c) => c.task === 'judge');
 	const image = judge.filter((c) => c.withImages);
 	const plan = calls.filter((c) => c.task === 'plan');
+	const target = calls.filter((c) => c.task === 'target');
+	const passConf = (correct: boolean): number[] =>
+		judge
+			.filter((c) => c.decision?.verdict === 'pass' && c.correct === correct)
+			.map((c) => c.decision?.confidence)
+			.filter((v): v is number => typeof v === 'number');
+	const correctPass = passConf(true);
+	const wrongPass = passConf(false);
+	const correctMin = correctPass.length === 0 ? null : Math.min(...correctPass);
+	const wrongMax = wrongPass.length === 0 ? null : Math.max(...wrongPass);
 	const byCase = new Map<string, CallRecord[]>();
 	for (const c of calls) byCase.set(c.caseId, [...(byCase.get(c.caseId) ?? []), c]);
 	// 반복 일치: 2회 이상 돌린 케이스 중 모든 반복이 유효하고 판단이 같은 비율 (모두 무효인 케이스는 뺀다)
@@ -292,7 +313,22 @@ export function summarize(run: ModelRun): ModelSummary {
 			imageCalls: image.length,
 			imageAccuracy: rate(image.filter((c) => c.correct).length, image.length),
 			confidentWrong: judge.filter((c) => c.confidentWrong).length,
-			uncertain: judge.filter((c) => c.decision?.verdict === 'uncertain').length
+			falsePass: judge.filter((c) => c.falsePass).length,
+			uncertain: judge.filter((c) => c.decision?.verdict === 'uncertain').length,
+			passConfidence: {
+				correctMin,
+				wrongMax,
+				separable: correctMin === null || wrongMax === null ? null : wrongMax < correctMin
+			}
+		},
+		target: {
+			calls: target.length,
+			exactRate: rate(target.filter((c) => c.correct).length, target.length),
+			calloutRate: rate(target.filter((c) => c.partial >= 0.5).length, target.length),
+			meanPartial:
+				target.length === 0
+					? null
+					: Math.round((target.reduce((s, c) => s + c.partial, 0) / target.length) * 1000) / 1000
 		},
 		plan: {
 			calls: plan.length,
@@ -319,8 +355,9 @@ export function summarize(run: ModelRun): ModelSummary {
 }
 
 /**
- * 순위 (결정적): 판정 정확도(JSON 오류는 오답) → 확신 오답 적은 순 → 계획 정확도 → 반복 일치 → 응답 시간.
- * 확신 오답(틀린 pass/fail 단정)은 사람이 믿고 넘어가는 오류라 표에 따로 보이고, 정확도가 같으면 이것으로 가른다.
+ * 순위 (결정적): 판정 정확도(JSON 오류는 오답) → 틀린 pass 적은 순 → 확신 오답 적은 순 → 목표 정확도
+ * → 계획 정확도(이전 방식) → 반복 일치 → 응답 시간.
+ * 틀린 pass(결함을 놓침)는 사람이 다시 보지 않는 오류라 정확도가 같으면 이것으로 먼저 가른다 (D-036 ④).
  */
 export function rankModels(summaries: readonly ModelSummary[]): ModelSummary[] {
 	const v = (x: number | null): number => x ?? -1;
@@ -329,8 +366,10 @@ export function rankModels(summaries: readonly ModelSummary[]): ModelSummary[] {
 		.sort(
 			(a, b) =>
 				v(b.judge.accuracy) - v(a.judge.accuracy) ||
+				a.judge.falsePass / Math.max(1, a.judge.calls) - b.judge.falsePass / Math.max(1, b.judge.calls) ||
 				a.judge.confidentWrong / Math.max(1, a.judge.calls) -
 					b.judge.confidentWrong / Math.max(1, b.judge.calls) ||
+				v(b.target.exactRate) - v(a.target.exactRate) ||
 				v(b.plan.exactRate) - v(a.plan.exactRate) ||
 				v(b.consistency) - v(a.consistency) ||
 				(a.medianMs ?? Infinity) - (b.medianMs ?? Infinity) ||

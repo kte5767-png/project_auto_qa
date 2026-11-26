@@ -1,7 +1,8 @@
 /**
- * 모델 비교용 케이스 (P0-8). 두 가지 일을 본다 — 설계 9장의 AI 사용처 중 P0-8에 필요한 것:
- *  - judge: TC 기대 결과 + TV에서 관찰한 내용(포커스·글자·잘라낸 화면) → pass / fail / uncertain
- *  - plan: TC 단계 + 화면설계서 콜아웃(방향키 동작) + 현재 포커스 → 리모컨 키 순서
+ * 모델 비교용 케이스 (P0-8). D-036 이후 AI가 맡는 일에 맞춘다:
+ *  - judge: TC 기대 결과 + TV에서 관찰한 내용(잘라낸 화면 등) → pass / fail / uncertain (시각·서술형만)
+ *  - target: TC 단계 + 화면 콜아웃 + 현재 포커스 → 목표(콜아웃·몇 번째 항목·마지막 키). 키 순서는 코드가 계산한다
+ *  - plan: (이전 방식, D-036 전) TC 단계 → 리모컨 키 순서. 예전 케이스 파일을 읽기 위해 남긴다
  * 회사 TC로 만든 케이스는 *.local.json 으로 두고 커밋하지 않는다.
  */
 
@@ -12,7 +13,9 @@ export const PLAN_KEYS = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'OK', 'BACK', 'HOME'] a
 export type PlanKey = (typeof PLAN_KEYS)[number];
 export const VERDICTS = ['pass', 'fail', 'uncertain'] as const;
 export type Verdict = (typeof VERDICTS)[number];
-export type Task = 'judge' | 'plan';
+export const FINISH_KEYS = ['OK', 'BACK', 'NONE'] as const;
+export type FinishKey = (typeof FINISH_KEYS)[number];
+export type Task = 'judge' | 'plan' | 'target';
 
 /** 화면설계서 콜아웃의 방향키 동작 (D-031의 keys와 같은 이름) */
 export type CalloutKeys = Partial<Record<'up' | 'down' | 'left' | 'right' | 'ok' | 'back', string>>;
@@ -44,7 +47,25 @@ export interface PlanCase {
 	answer: { keys: PlanKey[] };
 }
 
-export type LlmCase = JudgeCase | PlanCase;
+/** 목표 고르기 (D-036 ①): AI는 목표만 고르고, 경로는 `@auto-qa/planner`가 계산한다 */
+export interface TargetCase {
+	id: string;
+	task: 'target';
+	title?: string;
+	/** TC 단계 (조작 문장) */
+	step: string;
+	screen: {
+		name: string;
+		/** 현재 포커스 (콜아웃 번호나 이름) */
+		focus: string;
+		/** 콜아웃 번호·이름과, 목록이면 보이는 항목 이름 */
+		callouts: { no: string; label: string; items?: string[]; note?: string }[];
+	};
+	/** item은 목록 안 순번(1부터), finish는 도착해서 누를 키 (없으면 NONE) */
+	answer: { callout: string; item: number; finish: FinishKey };
+}
+
+export type LlmCase = JudgeCase | PlanCase | TargetCase;
 
 export interface CaseFile {
 	format: typeof CASE_FORMAT;
@@ -95,8 +116,20 @@ export function parseCaseFile(data: unknown): CaseFile {
 			const keys = answer['keys'];
 			if (!Array.isArray(keys) || !keys.every((k) => PLAN_KEYS.includes(k as PlanKey)))
 				problems.push(`${at}.answer.keys는 ${PLAN_KEYS.join(', ')} 목록`);
+		} else if (c['task'] === 'target') {
+			if (!isStr(c['step'])) problems.push(`${at}.step 없음`);
+			const screen = c['screen'];
+			const callouts = isObj(screen) && Array.isArray(screen['callouts']) ? screen['callouts'] : null;
+			if (!isObj(screen) || !isStr(screen['name']) || !isStr(screen['focus']) || callouts === null)
+				problems.push(`${at}.screen(name, focus, callouts) 없음`);
+			const nos = (callouts ?? []).map((x) => (isObj(x) ? x['no'] : undefined));
+			if (!nos.includes(answer['callout'])) problems.push(`${at}.answer.callout은 screen.callouts의 no 중 하나`);
+			if (typeof answer['item'] !== 'number' || !Number.isInteger(answer['item']) || answer['item'] < 1)
+				problems.push(`${at}.answer.item은 1 이상의 정수`);
+			if (!FINISH_KEYS.includes(answer['finish'] as FinishKey))
+				problems.push(`${at}.answer.finish는 ${FINISH_KEYS.join(' | ')} 중 하나`);
 		} else {
-			problems.push(`${at}.task는 judge 또는 plan`);
+			problems.push(`${at}.task는 judge, target, plan 중 하나`);
 		}
 	});
 	if (problems.length > 0) throw new Error(`케이스 파일 오류:\n- ${problems.join('\n- ')}`);

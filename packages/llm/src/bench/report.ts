@@ -12,6 +12,12 @@ export interface ReportMeta {
 const pct = (v: number | null): string => (v === null ? '-' : `${Math.round(v * 1000) / 10}%`);
 const sec = (ms: number | null): string => (ms === null ? '-' : `${(ms / 1000).toFixed(1)}s`);
 const gb = (bytes: number): string => `${(bytes / 1024 ** 3).toFixed(1)}GB`;
+const conf = (s: ReturnType<typeof summarize>): string => {
+	const p = s.judge.passConfidence;
+	if (p.correctMin === null && p.wrongMax === null) return '-';
+	return `${p.correctMin ?? '-'} / ${p.wrongMax ?? '-'}${p.separable === false ? ' (구분 안 됨)' : ''}`;
+};
+
 const cell = (s: string): string => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 /** 사람이 읽는 비교 결과 (Markdown) */
@@ -19,6 +25,7 @@ export function renderReport(result: CompareResult, cases: readonly LlmCase[], m
 	const summaries = result.runs.map(summarize);
 	const ranked = rankModels(summaries);
 	const judgeCases = result.cases.filter((c) => c.task === 'judge');
+	const count = (task: string): number => result.cases.filter((c) => c.task === task).length;
 	const o = result.options;
 	const lines: string[] = [
 		'# 로컬 LLM 비교 (P0-8)',
@@ -26,19 +33,19 @@ export function renderReport(result: CompareResult, cases: readonly LlmCase[], m
 		`- 일시: ${meta.startedAt} ~ ${meta.finishedAt}`,
 		`- Ollama ${result.ollamaVersion} · 프롬프트 ${result.promptVersion}`,
 		`- 설정: 반복 ${o.runs}회, 생각 모드 ${o.think}, temperature ${o.temperature}, seed ${o.seed}, num_ctx ${o.numCtx}, num_predict ${o.numPredict}`,
-		`- 케이스 ${result.cases.length}개: 판정 ${judgeCases.length}(이미지 ${judgeCases.filter((c) => c.withImages).length}), 계획 ${result.cases.length - judgeCases.length} — ${meta.caseFiles.join(', ')}`,
+		`- 케이스 ${result.cases.length}개: 판정 ${judgeCases.length}(이미지 ${judgeCases.filter((c) => c.withImages).length}), 목표 ${count('target')}, 계획(이전 방식) ${count('plan')} — ${meta.caseFiles.join(', ')}`,
 		'',
-		'> 판정 정확·계획 정확은 반복 전체 기준. 확신 오답 = 틀린 pass/fail을 단정한 수(확인할 수 없는 것을 pass라고 한 경우 포함) — 사람이 믿고 넘어가는 오류라 가장 위험하다.',
+		'> 정확도는 반복 전체 기준. 틀린 pass = 결함이 있는데 pass라고 한 수(사람이 다시 보지 않아 가장 위험, D-036 ④). 확신 오답 = 틀린 pass/fail 단정 전체. pass 신뢰도 = 맞은 pass 최소 / 틀린 pass 최대 — 틀린 쪽 최대가 더 작아야 신뢰도로 자동 확정을 고려할 수 있다. 목표 정확 = 콜아웃·순번·마지막 키가 모두 맞음, 콜아웃 = 콜아웃만 맞음.',
 		'',
 		'## 요약 (순위)',
 		'',
-		'| 순위 | 모델 | JSON 유효 | 판정 정확 | 이미지 판정 | 확신 오답 | 계획 정확 | 키 유사도 | 반복 일치 | 응답 중앙/95% | 토큰/초 | 로드 | 메모리(GPU) |',
-		'|---|---|---|---|---|---|---|---|---|---|---|---|---|'
+		'| 순위 | 모델 | JSON 유효 | 판정 정확 | 이미지 판정 | 틀린 pass | 확신 오답 | pass 신뢰도 | 목표 정확 | 콜아웃 | 계획 정확 | 반복 일치 | 응답 중앙/95% | 토큰/초 | 로드 | 메모리(GPU) |',
+		'|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'
 	];
 	ranked.forEach((s, i) => {
 		const mem = s.memory === null ? '-' : `${gb(s.memory.sizeBytes)} (${gb(s.memory.vramBytes)})`;
 		lines.push(
-			`| ${i + 1} | ${s.model} | ${pct(s.validRate)} | ${pct(s.judge.accuracy)} | ${pct(s.judge.imageAccuracy)} | ${s.judge.confidentWrong} | ${pct(s.plan.exactRate)} | ${s.plan.meanSimilarity ?? '-'} | ${pct(s.consistency)} | ${sec(s.medianMs)} / ${sec(s.p95Ms)} | ${s.tokensPerSecond ?? '-'} | ${sec(s.loadMs)} | ${mem} |`
+			`| ${i + 1} | ${s.model} | ${pct(s.validRate)} | ${pct(s.judge.accuracy)} | ${pct(s.judge.imageAccuracy)} | ${s.judge.falsePass} | ${s.judge.confidentWrong} | ${conf(s)} | ${pct(s.target.exactRate)} | ${pct(s.target.calloutRate)} | ${pct(s.plan.exactRate)} | ${pct(s.consistency)} | ${sec(s.medianMs)} / ${sec(s.p95Ms)} | ${s.tokensPerSecond ?? '-'} | ${sec(s.loadMs)} | ${mem} |`
 		);
 	});
 	const excluded = summaries.filter((s) => s.status !== 'ok' || s.calls === 0 || s.failures > 0 || s.skipped > 0);
@@ -59,7 +66,12 @@ export function renderReport(result: CompareResult, cases: readonly LlmCase[], m
 		lines.push('', '## 케이스별 결과', '', `| 케이스 | 정답 | ${models.map((r) => r.model).join(' | ')} |`);
 		lines.push(`|---|---|${models.map(() => '---').join('|')}|`);
 		for (const c of cases) {
-			const answer = c.task === 'judge' ? c.answer.verdict : c.answer.keys.join(' ');
+			const answer =
+				c.task === 'judge'
+					? c.answer.verdict
+					: c.task === 'target'
+						? `${c.answer.callout}#${c.answer.item} ${c.answer.finish}`
+						: c.answer.keys.join(' ');
 			const cols = models.map((r) => {
 				const calls = r.calls.filter((x) => x.caseId === c.id);
 				if (calls.length === 0) return '건너뜀';

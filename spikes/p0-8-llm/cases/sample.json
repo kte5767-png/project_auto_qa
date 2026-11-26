@@ -1,111 +1,8 @@
 {
 	"format": "auto-qa-llm-cases",
 	"version": 1,
-	"name": "샘플 (합성 — 비교 도구 확인용)",
+	"name": "합성 샘플 v2 (D-036: 시각·서술 판정 + 목표 고르기)",
 	"cases": [
-		{
-			"id": "j-text-01",
-			"task": "judge",
-			"title": "포커스 위치 맞음",
-			"expected": "Search field 영역에 포커스가 위치한다",
-			"observation": {
-				"screen": "검색",
-				"focus": "① Search field (검색 입력창)",
-				"texts": ["Search your destination or interest.", "Recommended Keywords"]
-			},
-			"answer": {
-				"verdict": "pass"
-			}
-		},
-		{
-			"id": "j-text-02",
-			"task": "judge",
-			"title": "포커스 위치 다름",
-			"expected": "VKB(가상 키보드)의 첫 번째 키에 포커스가 위치한다",
-			"observation": {
-				"screen": "검색",
-				"focus": "① Search field (검색 입력창)",
-				"note": "가상 키보드는 화면 아래에 표시되어 있음"
-			},
-			"answer": {
-				"verdict": "fail"
-			}
-		},
-		{
-			"id": "j-text-03",
-			"task": "judge",
-			"title": "안내 문구 노출",
-			"expected": "검색 결과가 없으면 'There are no results' 문구와 추천 키워드가 노출된다",
-			"observation": {
-				"screen": "검색 결과",
-				"focus": "① Search field",
-				"texts": [
-					"There are no results",
-					"How about these recommendations?",
-					"Walking in Bali",
-					"Driving in Hong Kong"
-				]
-			},
-			"answer": {
-				"verdict": "pass"
-			}
-		},
-		{
-			"id": "j-text-04",
-			"task": "judge",
-			"title": "플레이스홀더 문구 다름",
-			"expected": "검색 필드에 'Search your destination or interest.' 문구가 노출된다",
-			"observation": {
-				"screen": "검색",
-				"focus": "① Search field",
-				"texts": ["Search destination or interest"]
-			},
-			"answer": {
-				"verdict": "fail"
-			}
-		},
-		{
-			"id": "j-text-05",
-			"task": "judge",
-			"title": "최대 개수 초과",
-			"expected": "최근 검색어는 최대 5개까지 노출된다",
-			"observation": {
-				"screen": "검색",
-				"texts": ["Bali", "Summer Vacation", "Christmas Trip", "OTT", "Healing", "Paris"],
-				"note": "보이는 글자는 최근 검색어 영역의 글자다"
-			},
-			"answer": {
-				"verdict": "fail"
-			}
-		},
-		{
-			"id": "j-text-06",
-			"task": "judge",
-			"title": "Back 후 화면 그대로",
-			"expected": "Back 키를 누르면 Home 화면으로 이동한다",
-			"observation": {
-				"screen": "검색",
-				"focus": "① Search field",
-				"note": "Back 키를 누른 뒤 관찰한 화면"
-			},
-			"answer": {
-				"verdict": "fail"
-			}
-		},
-		{
-			"id": "j-text-07",
-			"task": "judge",
-			"title": "포커스 이동 맞음",
-			"expected": "포커스가 Top 10 두 번째 카드로 이동한다",
-			"observation": {
-				"screen": "홈",
-				"focus": "Top 10 2번 카드",
-				"note": "▶ 키를 누른 뒤 관찰"
-			},
-			"answer": {
-				"verdict": "pass"
-			}
-		},
 		{
 			"id": "j-text-08",
 			"task": "judge",
@@ -221,9 +118,8 @@
 			"images": ["images/promo-description-cut.png"]
 		},
 		{
-			"id": "p-01",
-			"task": "plan",
-			"title": "한 번 이동",
+			"id": "t-01",
+			"task": "target",
 			"step": "검색 필드에서 ▼ 키를 누른다",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -231,52 +127,33 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["DOWN"]
+				"callout": "②",
+				"item": 1,
+				"finish": "NONE"
 			}
 		},
 		{
-			"id": "p-02",
-			"task": "plan",
-			"title": "두 단계 이동",
+			"id": "t-02",
+			"task": "target",
 			"step": "추천 키워드 두 번째 항목으로 이동한다",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -284,52 +161,33 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["DOWN", "RIGHT"]
+				"callout": "②",
+				"item": 2,
+				"finish": "NONE"
 			}
 		},
 		{
-			"id": "p-03",
-			"task": "plan",
-			"title": "이동 후 선택",
+			"id": "t-03",
+			"task": "target",
 			"step": "설정 팝업을 연다",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -337,52 +195,33 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["RIGHT", "OK"]
+				"callout": "④",
+				"item": 1,
+				"finish": "OK"
 			}
 		},
 		{
-			"id": "p-04",
-			"task": "plan",
-			"title": "세 단계",
+			"id": "t-04",
+			"task": "target",
 			"step": "인기 콘텐츠 첫 카드의 상세 화면으로 들어간다",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -390,52 +229,33 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["DOWN", "DOWN", "OK"]
+				"callout": "③",
+				"item": 1,
+				"finish": "OK"
 			}
 		},
 		{
-			"id": "p-05",
-			"task": "plan",
-			"title": "되돌아가기",
+			"id": "t-05",
+			"task": "target",
 			"step": "검색 필드로 돌아간다",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -443,52 +263,33 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["UP"]
+				"callout": "①",
+				"item": 1,
+				"finish": "NONE"
 			}
 		},
 		{
-			"id": "p-06",
-			"task": "plan",
-			"title": "Back",
+			"id": "t-06",
+			"task": "target",
 			"step": "이전 화면으로 돌아간다 (Back 키)",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -496,52 +297,33 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["BACK"]
+				"callout": "③",
+				"item": 1,
+				"finish": "BACK"
 			}
 		},
 		{
-			"id": "p-07",
-			"task": "plan",
-			"title": "여러 번 오른쪽",
+			"id": "t-07",
+			"task": "target",
 			"step": "추천 키워드 세 번째 항목으로 검색한다",
 			"screen": {
 				"name": "샘플 검색 화면",
@@ -549,46 +331,198 @@
 				"callouts": [
 					{
 						"no": "①",
-						"label": "검색 필드",
-						"keys": {
-							"down": "② 추천 키워드 첫 항목으로 이동",
-							"right": "④ 설정 버튼으로 이동",
-							"ok": "키보드 열기"
-						}
+						"label": "검색 필드"
 					},
 					{
 						"no": "②",
 						"label": "추천 키워드 (가로 목록 5개)",
-						"keys": {
-							"up": "① 검색 필드로 이동",
-							"left": "이전 키워드로 이동",
-							"right": "다음 키워드로 이동",
-							"down": "③ 인기 콘텐츠 첫 카드로 이동",
-							"ok": "선택한 키워드로 검색"
-						}
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
 					},
 					{
 						"no": "③",
 						"label": "인기 콘텐츠 (가로 카드 목록)",
-						"keys": {
-							"up": "② 추천 키워드로 이동",
-							"left": "이전 카드로 이동",
-							"right": "다음 카드로 이동",
-							"ok": "상세 화면으로 이동"
-						}
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
 					},
 					{
 						"no": "④",
-						"label": "설정 버튼",
-						"keys": {
-							"left": "① 검색 필드로 이동",
-							"ok": "설정 팝업 열기"
-						}
+						"label": "설정 버튼"
 					}
 				]
 			},
 			"answer": {
-				"keys": ["DOWN", "RIGHT", "RIGHT", "OK"]
+				"callout": "②",
+				"item": 3,
+				"finish": "OK"
+			}
+		},
+		{
+			"id": "t-08",
+			"task": "target",
+			"step": "'Night View' 키워드를 선택한다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드"
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼"
+					}
+				]
+			},
+			"answer": {
+				"callout": "②",
+				"item": 3,
+				"finish": "OK"
+			}
+		},
+		{
+			"id": "t-09",
+			"task": "target",
+			"step": "인기 콘텐츠 두 번째 카드를 선택해 상세 화면에 진입한다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "② 추천 키워드 첫 항목",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드"
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼"
+					}
+				]
+			},
+			"answer": {
+				"callout": "③",
+				"item": 2,
+				"finish": "OK"
+			}
+		},
+		{
+			"id": "t-10",
+			"task": "target",
+			"step": "설정 버튼에 포커스를 둔다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "③ 인기 콘텐츠 첫 카드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드"
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼"
+					}
+				]
+			},
+			"answer": {
+				"callout": "④",
+				"item": 1,
+				"finish": "NONE"
+			}
+		},
+		{
+			"id": "t-11",
+			"task": "target",
+			"step": "검색 필드를 선택해 키보드를 연다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "② 추천 키워드 첫 항목",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드"
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼"
+					}
+				]
+			},
+			"answer": {
+				"callout": "①",
+				"item": 1,
+				"finish": "OK"
+			}
+		},
+		{
+			"id": "t-12",
+			"task": "target",
+			"step": "추천 키워드 마지막 항목(Museum)으로 이동한다",
+			"screen": {
+				"name": "샘플 검색 화면",
+				"focus": "① 검색 필드",
+				"callouts": [
+					{
+						"no": "①",
+						"label": "검색 필드"
+					},
+					{
+						"no": "②",
+						"label": "추천 키워드 (가로 목록 5개)",
+						"items": ["Beach", "Hiking", "Night View", "Food", "Museum"]
+					},
+					{
+						"no": "③",
+						"label": "인기 콘텐츠 (가로 카드 목록)",
+						"items": ["Ocean Drive", "City Walk", "Mountain View"]
+					},
+					{
+						"no": "④",
+						"label": "설정 버튼"
+					}
+				]
+			},
+			"answer": {
+				"callout": "②",
+				"item": 5,
+				"finish": "NONE"
 			}
 		}
 	]

@@ -37,7 +37,7 @@ const { values } = parseArgs({
 		cases: { type: 'string', multiple: true },
 		runs: { type: 'string', default: String(DEFAULT_COMPARE_OPTIONS.runs) },
 		think: { type: 'string', default: DEFAULT_COMPARE_OPTIONS.think },
-		tasks: { type: 'string', default: 'judge,plan' },
+		tasks: { type: 'string', default: 'judge,target,plan' },
 		limit: { type: 'string' },
 		'num-ctx': { type: 'string', default: String(DEFAULT_COMPARE_OPTIONS.numCtx) },
 		'num-predict': { type: 'string', default: String(DEFAULT_COMPARE_OPTIONS.numPredict) },
@@ -71,11 +71,16 @@ const gb = (bytes: number): string => `${(bytes / 1024 ** 3).toFixed(1)}GB`;
 const sec = (ms: number | null | undefined): string => (ms == null ? '-' : `${(ms / 1000).toFixed(1)}s`);
 const pct = (v: number | null): string => (v === null ? '-' : `${Math.round(v * 100)}%`);
 
-/** 가짜 모델 (--fake): 판정은 항상 pass, 계획은 ▼ 한 번. 이미지 미지원 모델, JSON을 못 내는 모델 포함 */
+/** 가짜 모델 (--fake): 판정은 항상 pass, 목표는 첫 콜아웃, 계획은 ▼ 한 번. 이미지 미지원 모델, JSON을 못 내는 모델 포함 */
 function fakeReply(broken: boolean) {
 	return (r: FakeChatRequest): string => {
 		if (broken) return '잘 모르겠습니다.';
 		if (r.format === undefined) return 'OK';
+		const props = (r.format as { properties?: Record<string, { enum?: string[] }> }).properties ?? {};
+		if (props['callout'] !== undefined) {
+			const first = props['callout'].enum?.[0] ?? '1';
+			return JSON.stringify({ callout: first, item: 1, finish: 'NONE', confidence: 0.5, reason: '가짜 응답' });
+		}
 		return r.messages[0]?.content.includes('리모컨')
 			? JSON.stringify({ keys: ['DOWN'], check: '포커스 확인', confidence: 0.5, reason: '가짜 응답' })
 			: JSON.stringify({ verdict: 'pass', confidence: 0.5, reason: '가짜 응답' });
@@ -195,10 +200,10 @@ try {
 	await writeFile(join(out, 'results.json'), `${JSON.stringify({ meta, ...result }, null, '\t')}\n`);
 	await writeFile(join(out, 'report.md'), renderReport(result, cases, meta));
 
-	console.log('\n순위 (판정 정확 → 확신 오답 → 계획 정확 → 반복 일치 → 속도)');
+	console.log('\n순위 (판정 정확 → 틀린 pass → 확신 오답 → 목표 정확 → 계획 정확 → 반복 일치 → 속도)');
 	rankModels(result.runs.map(summarize)).forEach((s, i) => {
 		console.log(
-			`  ${i + 1}. ${s.model.padEnd(24)} 판정 ${pct(s.judge.accuracy)} (이미지 ${pct(s.judge.imageAccuracy)}, 확신 오답 ${s.judge.confidentWrong})  계획 ${pct(s.plan.exactRate)}  반복 일치 ${pct(s.consistency)}  JSON ${pct(s.validRate)}  응답 ${sec(s.medianMs)}  로드 ${sec(s.loadMs)}  메모리 ${s.memory === null ? '-' : gb(s.memory.sizeBytes)}`
+			`  ${i + 1}. ${s.model.padEnd(24)} 판정 ${pct(s.judge.accuracy)} (이미지 ${pct(s.judge.imageAccuracy)}, 틀린 pass ${s.judge.falsePass})  목표 ${pct(s.target.exactRate)}${s.plan.calls > 0 ? `  계획 ${pct(s.plan.exactRate)}` : ''}  반복 일치 ${pct(s.consistency)}  JSON ${pct(s.validRate)}  응답 ${sec(s.medianMs)}  로드 ${sec(s.loadMs)}  메모리 ${s.memory === null ? '-' : gb(s.memory.sizeBytes)}`
 		);
 	});
 	for (const r of result.runs.filter((x) => x.status !== 'ok'))
