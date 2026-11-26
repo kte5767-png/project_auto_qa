@@ -42,6 +42,8 @@ export interface ObservedTarget {
 	hasFocus: boolean;
 	/** 포커스가 있는 항목의 순번 (0부터, 보이는 항목 기준). 없으면 -1 */
 	focusItem: number;
+	/** 글자가 칸을 넘치는 요소 수와 그중 말줄임(text-overflow: ellipsis)인 수 */
+	textOverflow: { overflowing: number; ellipsis: number };
 }
 
 export interface ObserveOptions {
@@ -152,6 +154,21 @@ function observeInPage(input: ObserveInput): Observation {
 				}
 			}
 		}
+		let overflowing = 0;
+		let ellipsis = 0;
+		for (const m of shown) {
+			const all = [m].concat(Array.prototype.slice.call(m.querySelectorAll('*')) as Element[]);
+			for (const el of all) {
+				let ownText = false;
+				for (let i = 0; i < el.childNodes.length; i++) {
+					const n = el.childNodes[i] as Node;
+					if (n.nodeType === 3 && clean(n.textContent) !== '') ownText = true;
+				}
+				if (!ownText || !(el instanceof HTMLElement) || el.scrollWidth <= el.clientWidth + 1) continue;
+				overflowing++;
+				if (window.getComputedStyle(el).textOverflow === 'ellipsis') ellipsis++;
+			}
+		}
 		let focusItem = -1;
 		for (let i = 0; i < items.length; i++) {
 			if (contains(items[i] as Element)) {
@@ -167,7 +184,8 @@ function observeInPage(input: ObserveInput): Observation {
 			itemCount: items.length,
 			itemTexts: items.slice(0, opts.maxItems).map(textOf),
 			hasFocus: matches.some(contains),
-			focusItem
+			focusItem,
+			textOverflow: { overflowing, ellipsis }
 		};
 	});
 
