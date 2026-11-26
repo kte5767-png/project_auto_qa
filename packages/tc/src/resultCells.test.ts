@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { inRange, listValidations, listValuesAt, resultCellWrites, resultVocabulary } from './resultCells';
+import {
+	DEFAULT_RESULT_CELL_OPTIONS,
+	inRange,
+	listValidations,
+	listValuesAt,
+	resultCellWrites,
+	resultVocabulary
+} from './resultCells';
 import type { StepResult } from './resultCells';
 
 const SHEET = `<worksheet><sheetData/><dataValidations count="3">
@@ -65,18 +72,29 @@ describe('resultCellWrites', () => {
 		{ resultCell: cell(6), outcome: 'needs-review', reason: '화면으로 확인할 수 있는 조건이 없음', checked: 0 }
 	];
 
-	it('Pass·Fail은 드롭다운 값, 이유는 이슈 열에. 확인 필요는 Passed + 표시 + 색, 확인한 조건이 없으면 쓰지 않는다', () => {
+	it('Pass·Fail은 드롭다운 값, 이유는 이슈 열에. Pass는 이유 칸을 비우고, 확인 필요는 Passed + 표시 + 색, 확인한 조건이 없으면 쓰지 않는다', () => {
 		const plan = resultCellWrites(steps, vocab, 'K');
 		expect(plan.writes.map((w) => [w.cell.address, w.value, w.highlight])).toEqual([
 			['H2', 'Passed', false],
 			['H3', 'Passed', false],
-			['K3', '확인하지 않은 조건: Admin 편성', false],
 			['H4', 'Failed', false],
 			['K4', '추천 검색어 6개 (최대 5개)', false],
 			['H5', 'Passed', false],
 			['K5', '[확인 필요] ▼ 후 포커스가 화면설계서와 다름', true]
 		]);
 		expect(plan.skipped.map((s) => s.cell.address)).toEqual(['H6']);
+	});
+
+	it('passNotes를 켜면 Pass에도 확인하지 않은 조건을 쓴다 ("모두 통과" 요약 줄은 뺌)', () => {
+		const plan = resultCellWrites(steps.slice(0, 2), vocab, 'K', {
+			...DEFAULT_RESULT_CELL_OPTIONS,
+			passNotes: true
+		});
+		expect(plan.writes.map((w) => [w.cell.address, w.value])).toEqual([
+			['H2', 'Passed'],
+			['H3', 'Passed'],
+			['K3', '확인하지 않은 조건: Admin 편성']
+		]);
 	});
 
 	it('이유 열이 없으면 결과 칸만 쓰고, 확인 필요는 결과 칸에 색으로 표시한다', () => {
