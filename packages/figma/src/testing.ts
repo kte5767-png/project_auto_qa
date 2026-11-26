@@ -191,6 +191,125 @@ export function sampleHomeFrame(): ExportedFrame {
 	};
 }
 
+/**
+ * 합성 검색 GUI 프레임 (D-033). 포커스를 컴포넌트 변형 이름(`status=focused`)으로 표시하는 디자인이다.
+ * - 왼쪽 메뉴: 현재 메뉴만 `selected` 변형 + 색 칠 (포커스 아님)
+ * - 검색창: `status=Typing` (입력 상태)
+ * - 탭 4개: 글자 길이에 따라 폭이 다르다. focusedTabs의 탭만 `status=focused` 변형(흰 칠 + 체크 아이콘), 마지막 탭은 `status=unfocused`
+ * - 카드 5개: 아래에 "NETFLIX · 1.5M views · 2 month ago" 글자 줄(폭이 서로 다름). 마지막 카드는 화면 오른쪽에 걸치고 흐림 레이어가 있다
+ */
+export function sampleSearchFrame(focusedTabs: readonly number[] = [0]): ExportedFrame {
+	counter = 0;
+	const variant = (setName: string | null, name: string): NodeOptions['component'] => ({
+		name,
+		setName,
+		properties: {}
+	});
+	const menu = node('FRAME', at(25, 352, 79, 279), {
+		name: 'menu',
+		children: ['Home', 'Search', 'My'].map((label, i) =>
+			node('INSTANCE', at(25, 352 + i * 100, 79, 79), {
+				name: 'menu_btn',
+				component: variant('menu_btn', i === 1 ? 'Property 1=selected' : 'Property 1=default'),
+				children: [
+					...(i === 1
+						? [node('RECTANGLE', at(25, 352 + i * 100, 79, 79), { fills: [solid(0, 1, 0.8)] })]
+						: []),
+					node('VECTOR', at(45, 372 + i * 100, 39, 39), { name: `icon ${label}`, fills: [WHITE] })
+				]
+			})
+		)
+	});
+	const search = node('INSTANCE', at(600, 54, 720, 66), {
+		name: 'search form',
+		component: variant('search form', 'status=Typing'),
+		fills: [solid(0.18, 0.2, 0.22)],
+		children: [text('Search here', at(677, 69, 400, 35), { size: 28 })]
+	});
+	const widths = [176, 172, 182, 152];
+	let x = 118;
+	const tabs = widths.map((w, i) => {
+		const focused = focusedTabs.includes(i);
+		const label = ['All', 'Driving', 'Walking', 'Place'][i] ?? '';
+		const tab = node('INSTANCE', at(x, 198, w, 63), {
+			name: 'btn_keyword',
+			component: variant(
+				'btn_keyword',
+				focused
+					? 'Type=category, status=focused'
+					: i === 3
+						? 'Type=category, status=unfocused'
+						: 'Type=category, status=default'
+			),
+			...(focused
+				? { fills: [solid(0.9, 0.9, 0.9)] }
+				: { strokes: [solid(0.9, 0.9, 0.9, 0.3)], strokeWeight: 2 }),
+			children: [
+				...(focused
+					? [
+							node('INSTANCE', at(x + 18, 210, 39, 39), {
+								name: 'btn_keyword/icn_selected_focused',
+								component: variant(null, 'btn_keyword/icn_selected_focused'),
+								children: [
+									node('VECTOR', at(x + 24, 220, 27, 19), {
+										name: 'shape',
+										fills: [solid(0.2, 0.2, 0.2)]
+									})
+								]
+							})
+						]
+					: []),
+				text(label, at(x + (focused ? 62 : 24), 213, w - 80, 32), { size: 26 })
+			]
+		});
+		x += w + 18;
+		return tab;
+	});
+	const meta = [
+		['NETFLIX', 88],
+		['1.5M views', 111],
+		['2 month ago', 167]
+	] as const;
+	const cards = node('FRAME', at(180, 324, 2200, 307), {
+		name: 'cards',
+		children: Array.from({ length: 5 }, (_, i) => {
+			const cx = 180 + i * 427;
+			let mx = cx;
+			return node('FRAME', at(cx, 324, 403, 307), {
+				name: `card${i + 1}`,
+				children: [
+					node('RECTANGLE', at(cx, 324, 403, 227), { name: 'Poster', fills: [IMAGE] }),
+					...(i === 4
+						? [node('RECTANGLE', at(cx, 324, 403, 227), { name: 'Line', fills: [solid(0, 0, 0, 0.6)] })]
+						: []),
+					text('Sample place', at(cx, 560, 300, 32), { size: 26 }),
+					node('FRAME', at(cx, 603, 400, 28), {
+						name: 'meta',
+						children: meta.map(([label, w]) => {
+							// 카드마다 글자 폭이 조금씩 다르다 (내용 길이)
+							const t = text(label, at(mx, 603, w + (i % 2) * 40, 28), { size: 20 });
+							mx += w + 20;
+							return t;
+						})
+					})
+				]
+			});
+		})
+	});
+	return {
+		pageId: '0:2',
+		pageName: 'GUI',
+		node: node('FRAME', at(0, 0, 1920, 1080), {
+			name: '9.1 Sample_검색 결과',
+			id: '9:search',
+			clipsContent: true,
+			fills: [solid(0, 0, 0)],
+			children: [menu, search, node('FRAME', at(118, 198, 800, 63), { name: 'tabs', children: tabs }), cards]
+		}),
+		image: null
+	};
+}
+
 /** 합성 화면설계서 프레임 (1920×1440 문서 페이지) */
 export function sampleSpecFrame(): ExportedFrame {
 	counter = 100;
