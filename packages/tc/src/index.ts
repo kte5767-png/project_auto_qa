@@ -23,4 +23,6 @@ export { summarize } from './summary';
 export type { ResultWrite, ResultWriteReport } from './workbook';
 export { readWorkbook, writeResultCopy } from './workbook';
 export type { PatchStatus } from './xlsxPatch';
-export { setCellText, sheetPartPaths, workbookPartPath } from './xlsxPatch';
+export { addMergeCells, cellStyle, setCellText, sheetPartPaths, workbookPartPath } from './xlsxPatch';
+export type { EndColumnPlan, EndColumns, StepValues } from './endColumns';
+export { END_COLUMN_HEADERS, endColumnWrites, endColumns } from './endColumns';

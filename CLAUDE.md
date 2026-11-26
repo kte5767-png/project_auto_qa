@@ -9,7 +9,7 @@
 - `docs/01-설계.md` — 시스템 구조, 공통 모델, 핵심 설계
 - `docs/02-개발지침.md` — 이 파일의 원본
 - `docs/03-로드맵.md` — Phase별 작업과 완료 기준
-- `docs/04-결정로그.md` — 결정(D-xxx)과 미결 사항(Qxx)
+- `docs/04-결정로그.md` — 결정(D-030~)과 미결 사항(Qxx). D-001~D-029는 `docs/04-결정로그-이전.md`
 - `docs/05-Figma-분석.md`, `docs/06-대상앱-분석.md`, `docs/07-TC-분석.md` — 실제 입력 분석
 
 ## 기본 원칙
@@ -31,6 +31,7 @@ pnpm typecheck        # 패키지별 tsc --noEmit
 pnpm sample:verify    # 샘플 앱 정답 결함 재현 확인 (Chrome)
 pnpm spike:focus      # P0-2 포커스 판별 (브라우저 시뮬레이터)
 pnpm spike:device     # P0-6 실기기 연결 (spikes/p0-6-device/README.md)
+pnpm spike:tc-run     # P0-8 TC 실행 → 사본 엑셀 맨 뒤 열 (spikes/p0-8-e2e/README.md)
 pnpm db:up            # PostgreSQL 실행 (docker compose)
 ```
 

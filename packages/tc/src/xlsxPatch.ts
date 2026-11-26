@@ -170,7 +170,7 @@ export function setCellText(
 	sheetXml: string,
 	address: string,
 	value: string,
-	options: { overwrite?: boolean; sharedStrings?: readonly string[] } = {}
+	options: { overwrite?: boolean; sharedStrings?: readonly string[]; style?: string } = {}
 ): { xml: string; status: PatchStatus } {
 	const prefix = /<(\w+:)?worksheet\b/.exec(sheetXml)?.[1] ?? '';
 	const { column, row } = splitAddress(address);
@@ -178,6 +178,7 @@ export function setCellText(
 	const inline = (attrs: Map<string, string>): string => {
 		const a = new Map(attrs);
 		for (const key of ['t', 'cm', 'vm']) a.delete(key);
+		if (options.style !== undefined) a.set('s', options.style);
 		a.set('t', 'inlineStr');
 		return `<${prefix}c${attributeText(a)}><${prefix}is><${prefix}t xml:space="preserve">${escapeXml(value)}</${prefix}t></${prefix}is></${prefix}c>`;
 	};
@@ -244,4 +245,72 @@ export function setCellText(
 	}
 	const rowXml = `<${prefix}row r="${row}">${inline(new Map([['r', address]]))}</${prefix}row>`;
 	return { xml: `${sheetXml.slice(0, insertRowAt)}${rowXml}${sheetXml.slice(insertRowAt)}`, status: 'written' };
+}
+
+/** 칸의 스타일 번호(s). 칸이 없거나 스타일이 없으면 undefined */
+export function cellStyle(sheetXml: string, address: string): string | undefined {
+	const prefix = /<(\w+:)?worksheet\b/.exec(sheetXml)?.[1] ?? '';
+	const re = new RegExp(`<${prefix}c\\b([^>]*?)(\\/>|>)`, 'g');
+	for (const m of sheetXml.matchAll(re)) {
+		const attrs = attributes(m[1] ?? '');
+		if (attrs.get('r') === address) return attrs.get('s');
+	}
+	return undefined;
+}
+
+/** mergeCells 뒤에 올 수 있는 요소 (OOXML 순서). 새 mergeCells는 이 중 처음 나오는 것 앞에 넣는다 */
+const AFTER_MERGE_CELLS = [
+	'phoneticPr',
+	'conditionalFormatting',
+	'dataValidations',
+	'hyperlinks',
+	'printOptions',
+	'pageMargins',
+	'pageSetup',
+	'headerFooter',
+	'rowBreaks',
+	'colBreaks',
+	'customProperties',
+	'cellWatches',
+	'ignoredErrors',
+	'smartTags',
+	'drawing',
+	'legacyDrawing',
+	'legacyDrawingHF',
+	'drawingHF',
+	'picture',
+	'oleObjects',
+	'controls',
+	'webPublishItems',
+	'tableParts',
+	'extLst'
+];
+
+/** 병합 범위를 더한다 (이미 있는 범위는 건너뜀). 범위가 겹치는지는 부르는 쪽이 책임진다 */
+export function addMergeCells(sheetXml: string, refs: readonly string[]): string {
+	if (refs.length === 0) return sheetXml;
+	const prefix = /<(\w+:)?worksheet\b/.exec(sheetXml)?.[1] ?? '';
+	const existing = new Set(
+		[...sheetXml.matchAll(new RegExp(`<${prefix}mergeCell\\b[^>]*\\bref="([^"]+)"`, 'g'))].map((m) => m[1])
+	);
+	const add = [...new Set(refs)].filter((r) => !existing.has(r));
+	if (add.length === 0) return sheetXml;
+	const cells = add.map((r) => `<${prefix}mergeCell ref="${r}"/>`).join('');
+	const open = new RegExp(`<${prefix}mergeCells\\b([^>]*?)(\\/?)>`).exec(sheetXml);
+	if (open !== null) {
+		const attrs = attributes(open[1] ?? '');
+		attrs.set('count', String(existing.size + add.length));
+		if (open[2] === '/') {
+			return `${sheetXml.slice(0, open.index)}<${prefix}mergeCells${attributeText(attrs)}>${cells}</${prefix}mergeCells>${sheetXml.slice(open.index + open[0].length)}`;
+		}
+		const close = sheetXml.indexOf(`</${prefix}mergeCells>`, open.index);
+		return `${sheetXml.slice(0, open.index)}<${prefix}mergeCells${attributeText(attrs)}>${sheetXml.slice(open.index + open[0].length, close)}${cells}${sheetXml.slice(close)}`;
+	}
+	const block = `<${prefix}mergeCells count="${add.length}">${cells}</${prefix}mergeCells>`;
+	let at = sheetXml.indexOf(`</${prefix}worksheet>`);
+	for (const name of AFTER_MERGE_CELLS) {
+		const m = new RegExp(`<${prefix}${name}\\b`).exec(sheetXml);
+		if (m !== null && m.index < at) at = m.index;
+	}
+	return `${sheetXml.slice(0, at)}${block}${sheetXml.slice(at)}`;
 }

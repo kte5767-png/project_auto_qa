@@ -9,30 +9,31 @@
  * --headed: 창을 띄워 진행을 본다. 1920×1080 화면이 모니터에 다 들어오게 창 배율을 맞추고(--scale),
  *   사람이 따라볼 수 있게 키마다 잠깐 멈춘다(--slow, 기본 800ms). 멈춤은 보기용이며 판정은 안정화 대기 후 관찰로 한다.
  */
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { BrowserDriver, fitWindowScale, launchBrowser, probeScreen } from '@auto-qa/browser';
-import type { Driver, RemoteKey } from '@auto-qa/core';
-import { analyzeExport, parseExport } from '@auto-qa/figma';
-import type { NormalizedFrame } from '@auto-qa/figma';
-import { observeTargets } from '@auto-qa/focus';
-import type { Observation, ObserveTarget, ObservedTarget } from '@auto-qa/focus';
+import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
+import type { Observation } from '@auto-qa/focus';
 import { VERDICT_LABEL, aggregateStep, checkExactText, checkMaxCount, checkPresence } from '@auto-qa/judge';
-import type { Check, CheckKind, CheckResult, StepVerdict, Verdict } from '@auto-qa/judge';
+import type { CheckResult, StepVerdict, Verdict } from '@auto-qa/judge';
+import { DEFAULT_KEYMAP_OPTIONS } from '@auto-qa/planner';
+import type { KeyMapOptions } from '@auto-qa/planner';
 import {
-	DEFAULT_KEYMAP_OPTIONS,
-	buildKeyMap,
-	expectAfterKey,
-	expectedItemIndex,
-	matchByName,
-	navScreenFromSpec
-} from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions } from '@auto-qa/planner';
-import { extractSpecScreen, mergeSpecScreens } from '@auto-qa/spec';
-import type { SpecKey, SpecScreen } from '@auto-qa/spec';
-import { DEFAULT_TIMING, SCENARIO_FORMAT, parseCalloutRef, validateScenario } from './scenario';
-import type { CheckDef, ElementDef, EntryStep, Scenario, StepDef, Timing } from './scenario';
+	KEY_LABEL,
+	Session,
+	checkSpecMove,
+	focusText,
+	jsonFiles,
+	loadKeyMaps,
+	record,
+	result,
+	runEntry,
+	target,
+	viewOptions
+} from './common';
+import type { Trail } from './common';
+import { DEFAULT_TIMING, SCENARIO_FORMAT, validateScenario } from './scenario';
+import type { CheckDef, Scenario, StepDef, Timing } from './scenario';
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
@@ -48,278 +49,6 @@ const { values, positionals } = parseArgs({
 	}
 });
 const cwd = process.env['INIT_CWD'] ?? process.cwd();
-
-const SPEC_KEY: Partial<Record<RemoteKey, SpecKey>> = {
-	UP: 'up',
-	DOWN: 'down',
-	LEFT: 'left',
-	RIGHT: 'right',
-	OK: 'ok',
-	BACK: 'back'
-};
-const KEY_LABEL: Record<RemoteKey, string> = {
-	UP: '▲',
-	DOWN: '▼',
-	LEFT: '◀',
-	RIGHT: '▶',
-	OK: 'OK',
-	BACK: 'Back',
-	HOME: 'Home'
-};
-
-// ── 입력 ────────────────────────────────────────────────
-
-async function jsonFiles(paths: readonly string[]): Promise<string[]> {
-	const out: string[] = [];
-	for (const p of paths) {
-		const full = resolve(cwd, p);
-		if ((await stat(full)).isDirectory()) {
-			for (const f of (await readdir(full)).sort()) if (f.endsWith('.json')) out.push(join(full, f));
-		} else out.push(full);
-	}
-	return out;
-}
-
-/** 화면설계서 내보내기 → 화면 번호별 이동 지도 */
-async function loadKeyMaps(paths: readonly string[], options: KeyMapOptions): Promise<Map<string, KeyAction[]>> {
-	const specs: SpecScreen[] = [];
-	const frames = new Map<string, NormalizedFrame>();
-	for (const f of await jsonFiles(paths)) {
-		for (const a of analyzeExport(parseExport(JSON.parse(await readFile(f, 'utf8'))))) {
-			if (a.kind !== 'spec') continue;
-			frames.set(a.frame.id, a.frame);
-			specs.push(extractSpecScreen(a.frame));
-		}
-	}
-	const maps = new Map<string, KeyAction[]>();
-	for (const merged of mergeSpecScreens(specs)) {
-		const screen = navScreenFromSpec(merged, frames);
-		if (screen.screenId !== null) maps.set(screen.screenId, buildKeyMap(screen, options));
-	}
-	return maps;
-}
-
-// ── 실행 ────────────────────────────────────────────────
-
-interface Trail {
-	key: RemoteKey | null;
-	focus: string;
-	stable: boolean;
-}
-
-class Session {
-	private readonly targets: ObserveTarget[];
-	/** 요소별 마지막 포커스 항목 (화면설계서 "이동한 이력이 있을 경우") */
-	readonly remembered = new Map<string, number>();
-
-	constructor(
-		readonly driver: Driver,
-		readonly scenario: Scenario,
-		readonly timing: Timing,
-		/** 키마다 사람이 볼 수 있게 멈추는 시간 (판정과 무관) */
-		readonly pauseMs: number
-	) {
-		this.targets = Object.entries(scenario.elements).map(([name, e]) => ({
-			name,
-			selector: e.selector,
-			textIncludes: e.textIncludes ?? null,
-			items: e.items ?? null
-		}));
-	}
-
-	async observe(): Promise<Observation> {
-		const obs = await observeTargets(this.driver, this.targets, {
-			focusSelector: this.scenario.focusSelector ?? null
-		});
-		for (const t of obs.targets) if (t.hasFocus && t.focusItem >= 0) this.remembered.set(t.name, t.focusItem);
-		return obs;
-	}
-
-	async press(key: RemoteKey): Promise<{ obs: Observation; stable: boolean }> {
-		await this.driver.pressKey(key);
-		const s = await this.driver.waitForStable();
-		const obs = await this.observe();
-		if (this.pauseMs > 0) await new Promise((r) => setTimeout(r, this.pauseMs));
-		return { obs, stable: s.stable };
-	}
-
-	/** 조건이 맞을 때까지 확인 (고정 sleep 대신 조건 대기) */
-	async until(test: (o: Observation) => boolean, timeoutMs: number): Promise<Observation | null> {
-		const end = Date.now() + timeoutMs;
-		for (;;) {
-			const obs = await this.observe();
-			if (test(obs)) return obs;
-			if (Date.now() >= end) return null;
-			await new Promise((r) => setTimeout(r, this.timing.pollMs));
-		}
-	}
-}
-
-const target = (obs: Observation, name: string): ObservedTarget | undefined => obs.targets.find((t) => t.name === name);
-
-/** 포커스를 요소 이름으로 (가장 안쪽 = 항목 순번이 있는 것 우선) */
-function focusText(obs: Observation): string {
-	const inside = obs.targets.filter((t) => t.hasFocus);
-	if (inside.length > 0) {
-		return inside
-			.map((t) => (t.focusItem >= 0 && t.itemCount > 1 ? `${t.name}[${t.focusItem}]` : t.name))
-			.join(' > ');
-	}
-	if (obs.focus === null) return '(포커스 없음)';
-	const f = obs.focus;
-	return `${f.tag}${f.spotlightId === null ? '' : `#${f.spotlightId}`} "${f.text.slice(0, 30)}"`;
-}
-
-function record(trail: Trail[], t: Trail, indent = '  진입 '): void {
-	trail.push(t);
-	console.log(
-		`${indent}${t.key === null ? '(대기)' : KEY_LABEL[t.key]} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`
-	);
-}
-
-async function runEntry(session: Session, entry: readonly EntryStep[], trail: Trail[]): Promise<string | null> {
-	for (const step of entry) {
-		if ('waitFocus' in step) {
-			const obs = await session.until((o) => o.focus !== null, step.timeoutMs ?? session.timing.readyTimeoutMs);
-			if (obs === null) return '앱에 포커스가 생기지 않음 (앱이 떴는지, 로딩·팝업 확인)';
-			record(trail, { key: null, focus: focusText(obs), stable: true });
-		} else if ('waitFor' in step) {
-			const obs = await session.until(
-				(o) => (target(o, step.waitFor)?.visible ?? 0) > 0,
-				step.timeoutMs ?? session.timing.readyTimeoutMs
-			);
-			if (obs === null) return `"${step.waitFor}"가 보이지 않음`;
-			record(trail, { key: null, focus: focusText(obs), stable: true });
-		} else {
-			const goal = step.until;
-			if (goal === undefined) {
-				const r = await session.press(step.press);
-				record(trail, { key: step.press, focus: focusText(r.obs), stable: r.stable });
-				continue;
-			}
-			const reached = (o: Observation): boolean => target(o, goal)?.hasFocus === true;
-			if (reached(await session.observe())) continue;
-			const max = step.max ?? 5;
-			let done = false;
-			for (const [key, times] of [
-				[step.press, max],
-				...(step.else === undefined ? [] : [[step.else, max * 2] as const])
-			] as const) {
-				for (let i = 0; i < times && !done; i++) {
-					const r = await session.press(key);
-					record(trail, { key, focus: focusText(r.obs), stable: r.stable });
-					done = reached(r.obs);
-				}
-				if (done) break;
-			}
-			if (!done) return `${KEY_LABEL[step.press]}로 "${goal}"에 가지 못함`;
-		}
-	}
-	return null;
-}
-
-// ── 판정 ────────────────────────────────────────────────
-
-const result = (
-	clause: string,
-	kind: CheckKind,
-	verdict: Verdict | null,
-	explanation: string,
-	value: Check['value'] = null
-): CheckResult => {
-	const check: Check = { kind, method: verdict === null ? 'none' : 'code', value, reason: '시나리오' };
-	return {
-		clause: { text: clause, section: null, key: null, checks: [check] },
-		check,
-		verdict,
-		explanation,
-		oracle: verdict === null ? 'none' : 'code',
-		confidence: null
-	};
-};
-
-interface SpecContext {
-	keyMaps: Map<string, KeyAction[]> | null;
-	options: KeyMapOptions;
-}
-
-/** 키 한 번의 이동을 화면설계서 이동 지도로 확인 */
-function checkSpecMove(
-	scenario: Scenario,
-	spec: SpecContext,
-	before: Observation,
-	key: RemoteKey,
-	after: Observation,
-	remembered: ReadonlyMap<string, number>
-): CheckResult {
-	const label = `[${KEY_LABEL[key]}] 화면설계서 이동`;
-	const specKey = SPEC_KEY[key];
-	if (specKey === undefined) return result(label, 'key', null, `${KEY_LABEL[key]} 키는 이동 지도에 없음`);
-	if (spec.keyMaps === null) return result(label, 'key', null, '화면설계서가 주어지지 않음 (--spec)');
-
-	const elements = Object.entries(scenario.elements);
-	const from = elements.find(([name, e]) => e.callout !== undefined && target(before, name)?.hasFocus === true);
-	if (from === undefined) {
-		return result(label, 'key', null, `누르기 전 포커스(${focusText(before)})가 콜아웃과 대응된 요소에 없음`);
-	}
-	const [fromName, fromDef] = from;
-	const ref = parseCalloutRef(fromDef.callout ?? '');
-	const actions = ref === null ? undefined : spec.keyMaps.get(ref.screen);
-	if (ref === null || actions === undefined) {
-		return result(label, 'key', null, `화면설계서에 ${ref?.screen ?? '?'} 화면이 없음`);
-	}
-	const prev = target(before, fromName);
-	const position =
-		prev !== undefined && prev.focusItem >= 0 && prev.itemCount > 1
-			? { index: prev.focusItem, count: prev.itemCount }
-			: null;
-	const exp = expectAfterKey(actions, ref.no, specKey, position);
-	const clause = `${ref.screen} ${exp.basis}`;
-	if (!exp.ok) return result(clause, 'key', null, exp.reason);
-
-	let want: [string, ElementDef] | undefined;
-	if (exp.target.kind === 'same') want = from;
-	else if (exp.target.kind === 'callout') {
-		const no = exp.target.no;
-		want = elements.find(([, e]) => e.callout === `${ref.screen}#${no}`);
-		if (want === undefined) return result(clause, 'key', null, `${ref.screen} ${no}번 콜아웃에 대응된 요소가 없음`);
-	} else {
-		const name = exp.target.kind === 'element' ? exp.target.name : exp.target.to;
-		const m = matchByName(name, elements, ([n, e]) => [n, ...(e.names ?? [])], spec.options);
-		if (m === null) return result(clause, 'key', null, `"${name}"에 대응된 요소가 없음`);
-		want = m.match;
-	}
-	const [wantName] = want;
-	const got = target(after, wantName);
-	const index =
-		got === undefined || got.itemCount <= 1
-			? null
-			: expectedItemIndex(exp.item, {
-					previous: wantName === fromName ? (prev?.focusItem ?? -1) : -1,
-					count: got.itemCount,
-					remembered: remembered.get(wantName) ?? null,
-					endNoop: exp.endNoop
-				});
-	const wantText = `${wantName}${index === null ? '' : `[${index}]`}`;
-	const ok = got?.hasFocus === true && (index === null || got.focusItem === index);
-	const actual = focusText(after);
-	if (exp.estimated) {
-		return result(
-			clause,
-			'key',
-			'needs-review',
-			`키 방향으로 추정한 대상 ${wantText} / 실제 ${actual} — 사람 확인 필요`
-		);
-	}
-	return ok
-		? result(clause, 'key', 'pass', `${KEY_LABEL[key]} → ${actual} (화면설계서대로)`, wantName)
-		: result(
-				clause,
-				'key',
-				'fail',
-				`${KEY_LABEL[key]} 후 포커스가 화면설계서와 다름: 기대 ${wantText} / 실제 ${actual}`
-			);
-}
 
 function checkStep(
 	scenario: Scenario,
@@ -448,7 +177,7 @@ async function main(): Promise<void> {
 	const url = values.url ?? scenario.url;
 
 	const options: KeyMapOptions = { ...DEFAULT_KEYMAP_OPTIONS, aliases: scenario.aliases ?? {} };
-	const specFiles = await jsonFiles(values.spec);
+	const specFiles = await jsonFiles(values.spec, cwd);
 	const keyMaps = specFiles.length === 0 ? null : await loadKeyMaps(specFiles, options);
 	if (keyMaps !== null) console.log(`화면설계서 화면 ${keyMaps.size}개: ${[...keyMaps.keys()].join(', ')}`);
 
@@ -456,25 +185,10 @@ async function main(): Promise<void> {
 	const out = join(resolve(cwd, values.out), stamp);
 	await mkdir(out, { recursive: true });
 
-	let windowScale: number | undefined;
-	if (values.headed) {
-		if (values.scale === 'auto') {
-			const screen = await probeScreen();
-			windowScale = fitWindowScale(screen) ?? undefined;
-			console.log(
-				`창 배율 ${windowScale ?? '그대로'} (모니터 ${screen.availWidth}×${screen.availHeight}, 시스템 배율 ${screen.dpr})`
-			);
-		} else {
-			windowScale = Number(values.scale);
-			if (!(windowScale > 0)) throw new Error(`--scale은 양수 또는 auto: ${values.scale}`);
-		}
-	}
-	const pauseMs = values.slow === undefined ? (values.headed ? 800 : 0) : Number(values.slow);
-	if (!(pauseMs >= 0)) throw new Error(`--slow는 0 이상의 ms: ${String(values.slow)}`);
-
+	const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
 	const browser = await launchBrowser({ headless: !values.headed, windowScale });
 	const driver = await BrowserDriver.open(browser, url);
-	const session = new Session(driver, scenario, timing, pauseMs);
+	const session = new Session(driver, scenario.elements, scenario.focusSelector ?? null, timing, pauseMs);
 	const entryTrail: Trail[] = [];
 	const steps: StepReport[] = [];
 	let entryError: string | null;
@@ -495,7 +209,7 @@ async function main(): Promise<void> {
 					const remembered = new Map(session.remembered);
 					const r = await session.press(key);
 					obs = r.obs;
-					const move = checkSpecMove(scenario, { keyMaps, options }, before, key, obs, remembered);
+					const move = checkSpecMove(scenario.elements, { keyMaps, options }, before, key, obs, remembered);
 					moves.push(move);
 					record(trail, { key, focus: focusText(obs), stable: r.stable }, '    ');
 					if (move.verdict !== null && move.verdict !== 'pass') {

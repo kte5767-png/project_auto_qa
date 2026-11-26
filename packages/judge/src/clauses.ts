@@ -205,7 +205,7 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 		.trim();
 	const ref = has(t, options.referenceWords) ?? (/#\s*\d+(\.\d+)+/.test(t) ? '#' : undefined);
 	const transition =
-		/(페이지|화면|page)\s*(으로|로)?\s*(이동|진입|전환)(?!\s*(이|횟수|이력))/i.test(body) ||
+		/(페이지|화면|page)\s*(으로|로)?\s*(이동|진입|전환)(?!\s*(이|횟수|이력|시(?![가-힣])))/i.test(body) ||
 		/(으로|로)\s*진입$/.test(body);
 	const data = has(body, options.dataWords);
 	if (data !== undefined) add('data', 'none', data, `운영·백엔드 데이터 ("${data}")`);

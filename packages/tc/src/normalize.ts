@@ -65,7 +65,9 @@ function normalizeSheet(
 	diagnostics: Diagnostic[]
 ): TcCase[] {
 	const cols = roleColumns(profile);
-	const end = lastRow(sheet);
+	// 마지막 단계가 병합으로 아래 행까지 이어지면 그 행까지 본다 (병합의 나머지 칸은 비어 있어 lastRow에 안 잡힌다)
+	const filled = lastRow(sheet);
+	const end = Math.max(filled, ...sheet.merges.filter((m) => m.top <= filled).map((m) => m.bottom));
 	const maxMapped = Math.max(...Object.values(cols));
 	const referenceRe = profile.referencePattern === null ? null : new RegExp(profile.referencePattern, 'gi');
 	const cases: TcCase[] = [];

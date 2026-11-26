@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+	addMergeCells,
+	cellStyle,
 	escapeXml,
 	parseSharedStrings,
 	relationshipTargets,
@@ -134,5 +136,29 @@ describe('setCellText', () => {
 	it('cols의 col 요소와 c 요소를 헷갈리지 않는다', () => {
 		const xml = sheet('<row r="2"><c r="H2"/></row>', '<cols><col min="1" max="1" width="5"/></cols>');
 		expect(setCellText(xml, 'H2', 'P').xml).toContain('<cols><col min="1" max="1" width="5"/></cols>');
+	});
+});
+
+describe('cellStyle / style 옵션', () => {
+	it('다른 칸의 스타일을 읽어 새 칸에 쓴다', () => {
+		const xml = sheet('<row r="2"><c r="H2" s="7"/></row>');
+		expect(cellStyle(xml, 'H2')).toBe('7');
+		expect(cellStyle(xml, 'Z9')).toBeUndefined();
+		const { xml: out } = setCellText(xml, 'J2', 'Pass', { style: '7' });
+		expect(out).toContain('<c r="J2" s="7" t="inlineStr">');
+	});
+});
+
+describe('addMergeCells', () => {
+	it('있는 mergeCells에 더하고 개수를 고친다 (이미 있는 범위는 건너뜀)', () => {
+		const out = addMergeCells(sheet(''), ['J4:J5', 'H4:H5']);
+		expect(out).toContain('<mergeCells count="2"><mergeCell ref="H4:H5"/><mergeCell ref="J4:J5"/></mergeCells>');
+	});
+
+	it('mergeCells가 없으면 순서에 맞는 자리(pageMargins 앞)에 만든다', () => {
+		const xml = `<worksheet ${NS}><sheetData/><pageMargins left="0.7"/></worksheet>`;
+		expect(addMergeCells(xml, ['A1:A2'])).toBe(
+			`<worksheet ${NS}><sheetData/><mergeCells count="1"><mergeCell ref="A1:A2"/></mergeCells><pageMargins left="0.7"/></worksheet>`
+		);
 	});
 });

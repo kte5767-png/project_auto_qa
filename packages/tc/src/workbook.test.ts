@@ -8,6 +8,7 @@ import { cellText } from './grid';
 import { normalize } from './normalize';
 import { suggestProfile } from './suggest';
 import { ROW_PER_STEP_HEADER, defined } from './testing';
+import { endColumnWrites, endColumns } from './endColumns';
 import { readWorkbook, writeResultCopy } from './workbook';
 
 let dir = '';
@@ -102,6 +103,41 @@ describe('writeResultCopy', () => {
 		});
 		expect(written).toBe(1);
 		expect(cellText(defined((await readWorkbook(output)).sheets[0]), 3, 8)).toBe('F');
+	});
+
+	it('표 맨 뒤에 자동 판정 열을 쓰고, 여러 행 단계는 같은 범위로 병합하고, 결과 칸 스타일을 따른다 (D-034)', async () => {
+		const grid = await readWorkbook(source);
+		const profile = suggestProfile(grid);
+		const sheetProfile = defined(profile.sheets.find((p) => p.sheet === 'Home'));
+		const home = defined(grid.sheets[0]);
+		const target = endColumns(home, sheetProfile.headerRow);
+		expect(target.columns).toEqual([10, 11, 12]); // 헤더 9열(A~I) 다음
+		const steps = normalize(grid, profile).cases.flatMap((c) => c.steps);
+		const plan = endColumnWrites(
+			target,
+			steps.map((s) => ({
+				row: s.row,
+				rowSpan: s.rowSpan,
+				values: ['Pass', `설명 ${s.row}`, '코드 1'],
+				styleFrom: s.resultCell?.address ?? null
+			})),
+			{ headerStyleFrom: 'H1' }
+		);
+		expect(plan.merges.map((m) => m.ref)).toEqual(['J4:J5', 'K4:K5', 'L4:L5']);
+		const output = join(dir, 'end.xlsx');
+		const report = await writeResultCopy(source, output, plan.writes, { merges: plan.merges });
+		expect(report.written).toBe(12);
+		const after = defined((await readWorkbook(output)).sheets[0]);
+		expect([cellText(after, 1, 10), cellText(after, 1, 11), cellText(after, 1, 12)]).toEqual([
+			'자동 판정',
+			'판정 설명',
+			'판정 근거'
+		]);
+		expect(cellText(after, 4, 11)).toBe('설명 4');
+		expect(after.merges).toContainEqual({ top: 4, left: 10, bottom: 5, right: 10 });
+		expect(cellText(after, 3, 8)).toBe('P'); // 원본 P/F 칸은 그대로
+		// 같은 사본을 다시 검수하면 같은 열을 다시 쓴다
+		expect(endColumns(after, sheetProfile.headerRow)).toMatchObject({ columns: [10, 11, 12], reused: true });
 	});
 
 	it('원본 경로에는 쓰지 않는다', async () => {

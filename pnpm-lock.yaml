@@ -282,6 +282,9 @@ importers:
       '@auto-qa/spec':
         specifier: workspace:*
         version: link:../../packages/spec
+      '@auto-qa/tc':
+        specifier: workspace:*
+        version: link:../../packages/tc
     devDependencies:
       tsx:
         specifier: ^4.23.15
