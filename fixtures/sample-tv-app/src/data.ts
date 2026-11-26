@@ -48,6 +48,28 @@ export const SEARCH_CARDS: Item[] = ['Ubud Rice Terraces', 'Victoria Peak', 'Gre
 	(title, i) => ({ id: `search-card-${i + 1}`, title, hue: (i * 53 + 20) % 360 })
 );
 
+/** 검색 결과 찾기용 낱말 (카드 제목과 함께 본다) */
+const SEARCH_TAGS: Record<string, string> = {
+	'search-card-1': 'bali walking ubud indonesia',
+	'search-card-2': 'hong kong driving victoria',
+	'search-card-3': 'china great wall place beijing',
+	'search-card-4': 'greece romantic santorini island',
+	'search-card-5': 'slovenia family lake bled'
+};
+
+/** 검색어 낱말(3자 이상) 하나라도 제목·낱말에 들어 있는 카드 */
+export function searchCards(query: string): Item[] {
+	const words = query
+		.toLowerCase()
+		.split(/\s+/)
+		.filter((w) => w.length >= 3);
+	if (words.length === 0) return [];
+	return SEARCH_CARDS.filter((card) => {
+		const text = `${card.title} ${SEARCH_TAGS[card.id] ?? ''}`.toLowerCase();
+		return words.some((w) => text.includes(w));
+	});
+}
+
 export function gradientOf(hue: number): string {
 	return `linear-gradient(135deg, hsl(${hue} 55% 42%), hsl(${(hue + 40) % 360} 60% 22%))`;
 }

@@ -1,4 +1,5 @@
 import type { RemoteKey } from './remote';
+import type { TypeTextOptions, TypeTextResult } from './text';
 
 /**
  * 드라이버 공통 인터페이스 (설계 4장). 실기기(`@auto-qa/device-webos`)와
@@ -51,6 +52,11 @@ export interface Driver extends ScriptRunner {
 	readonly kind: 'webos' | 'browser';
 	/** 리모컨 키 한 번. 이 환경에서 보낼 수 없는 키면 UnsupportedKeyError */
 	pressKey(key: RemoteKey): Promise<void>;
+	/**
+	 * 지금 DOM 포커스가 있는 입력란에 글자를 넣는다 (플랫폼 키보드로 친 것처럼, 키 이벤트 아님, D-043 ①).
+	 * 입력란에 포커스가 없거나 글자가 반영되지 않으면 TextInputError
+	 */
+	typeText(text: string, options?: Partial<TypeTextOptions>): Promise<TypeTextResult>;
 	waitForStable(options?: StableOptions): Promise<StableResult>;
 	/** 앱 화면 캡처 (시스템 UI는 포함하지 않는다) */
 	screenshot(options?: ScreenshotOptions): Promise<Uint8Array>;

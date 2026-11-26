@@ -20,6 +20,10 @@ export interface FakeSsapOptions {
 	denyPointer?: boolean;
 	/** 버튼을 받으면 호출 */
 	onButton?: (name: string) => void;
+	/** 키보드 서비스(IME) 요청을 받으면 호출 (insertText·deleteCharacters·sendEnterKey) */
+	onIme?: (method: string, payload: Record<string, unknown>) => void;
+	/** 키보드 서비스 요청을 거절 (권한 부족 흉내) */
+	denyIme?: boolean;
 }
 
 export interface FakeSsap {
@@ -27,6 +31,8 @@ export interface FakeSsap {
 	prompts: number;
 	buttons: string[];
 	registrations: Record<string, unknown>[];
+	/** 받은 키보드 서비스 요청 ("insertText bali" 형태) */
+	ime: string[];
 	close(): Promise<void>;
 }
 
@@ -39,6 +45,7 @@ export async function startFakeSsap(options: FakeSsapOptions = {}): Promise<Fake
 		prompts: 0,
 		buttons: [],
 		registrations: [],
+		ime: [],
 		close: () =>
 			new Promise((resolve) => {
 				for (const client of wss.clients) client.terminate();
@@ -94,6 +101,21 @@ export async function startFakeSsap(options: FakeSsapOptions = {}): Promise<Fake
 						? { returnValue: false, errorText: '401 insufficient permissions' }
 						: { returnValue: true, socketPath: `ws://127.0.0.1:${state.port}/pointer` };
 				ws.send(JSON.stringify({ type: 'response', id: message.id, payload }));
+				return;
+			}
+			const ime = /^ssap:\/\/com\.webos\.service\.ime\/(\w+)$/.exec(message.uri ?? '')?.[1];
+			if (message.type === 'request' && ime !== undefined) {
+				const body = message.payload ?? {};
+				if (options.denyIme === true) {
+					const payload = { returnValue: false, errorText: '401 insufficient permissions' };
+					ws.send(JSON.stringify({ type: 'response', id: message.id, payload }));
+					return;
+				}
+				state.ime.push(
+					`${ime}${body['text'] === undefined ? '' : ` ${String(body['text'])}`}${body['count'] === undefined ? '' : ` ${String(body['count'])}`}`
+				);
+				options.onIme?.(ime, body);
+				ws.send(JSON.stringify({ type: 'response', id: message.id, payload: { returnValue: true } }));
 			}
 		});
 	});

@@ -1,9 +1,10 @@
-import { PAGE_SCRIPT_ECMA_VERSION, UnsupportedKeyError } from '@auto-qa/core';
+import { PAGE_SCRIPT_ECMA_VERSION, TextInputError, UnsupportedKeyError } from '@auto-qa/core';
 import { parse } from 'acorn';
 import { afterEach, describe, expect, it } from 'vitest';
 import { deviceConfigFromEnv } from './config';
 import type { KeyMode } from './config';
 import { WebOsDriver } from './driver';
+import { SsapError } from './ssap';
 import { closedPort, startFakeInspector, startFakeSsap } from './testing/fakeTv';
 import type { FakeInspector, FakeSsap } from './testing/fakeTv';
 
@@ -29,6 +30,33 @@ function fakePage(expressions: string[], delivered = true) {
 		if (expression.includes('waitKeyInPage')) return { delivered, latencyMs: 12, keyCode: 40 };
 		if (expression.includes('stableInPage')) return { stable: true, waitedMs: 130, mode: 'legacy' };
 		return null;
+	};
+}
+
+/** 가짜 입력란: 글자 입력 페이지 스크립트에 이 값으로 답한다 */
+interface FakeField {
+	value: string;
+	editable: boolean;
+	selected: boolean;
+}
+
+function fieldPage(field: FakeField, expressions: string[]) {
+	const base = fakePage(expressions);
+	return (expression: string): unknown => {
+		const arg = /\)\(([^()]*)\);\}\)\(\)$/.exec(expression)?.[1];
+		if (expression.includes('textFieldInPage')) {
+			expressions.push(expression);
+			const mode = JSON.parse(arg ?? '"read"') as string;
+			if (mode === 'select') field.selected = true;
+			if (mode === 'clear') field.value = '';
+			return { editable: field.editable, tag: field.editable ? 'input' : '', value: field.value };
+		}
+		if (expression.includes('textChangeInPage')) {
+			expressions.push(expression);
+			const from = (JSON.parse(arg ?? '{}') as { from: string }).from;
+			return { editable: true, tag: 'input', value: field.value, changed: field.value !== from };
+		}
+		return base(expression);
 	};
 }
 
@@ -87,6 +115,67 @@ describe('WebOsDriver (가짜 TV)', () => {
 		await driver.press('DOWN');
 		expect(inspector.methods.filter((m) => m === 'Input.dispatchKeyEvent')).toHaveLength(2);
 		await expect(driver.press('HOME')).rejects.toBeInstanceOf(UnsupportedKeyError);
+	});
+
+	it('글자 입력(SSAP): 키보드 서비스로 지우고 넣고 확인을 보낸다, 페어링은 CONTROL_INPUT_TEXT 권한을 요청한다', async () => {
+		const expressions: string[] = [];
+		const field: FakeField = { value: 'old', editable: true, selected: false };
+		inspector = await startFakeInspector({ evaluate: fieldPage(field, expressions) });
+		ssap = await startFakeSsap({
+			onIme: (method, payload) => {
+				if (method === 'deleteCharacters') field.value = field.value.slice(0, -Number(payload['count']));
+				if (method === 'insertText') field.value += String(payload['text']);
+			}
+		});
+		driver = await WebOsDriver.connect({ config: await config('ssap') });
+		const manifest = ssap.registrations[0]?.['manifest'] as { permissions: string[] };
+		expect(manifest.permissions).toContain('CONTROL_INPUT_TEXT');
+
+		const result = await driver.typeText('bali', { replace: true, submit: true });
+		expect(result).toEqual({ value: 'bali' });
+		expect(ssap.ime).toEqual(['deleteCharacters 3', 'insertText bali', 'sendEnterKey']);
+		for (const expression of expressions) {
+			expect(() => parse(expression, { ecmaVersion: PAGE_SCRIPT_ECMA_VERSION })).not.toThrow();
+		}
+	});
+
+	it('글자 입력: 입력란에 포커스가 없거나 글자가 반영되지 않으면 TextInputError', async () => {
+		const field: FakeField = { value: '', editable: false, selected: false };
+		inspector = await startFakeInspector({ evaluate: fieldPage(field, []) });
+		ssap = await startFakeSsap();
+		driver = await WebOsDriver.connect({ config: await config('ssap') });
+		await expect(driver.typeText('bali')).rejects.toThrow(/포커스된 입력란이 없음/);
+		field.editable = true;
+		const error = await driver.typeText('bali').catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(TextInputError);
+		expect(String(error)).toContain('CONTROL_INPUT_TEXT');
+	});
+
+	it('글자 입력: 키보드 서비스 권한이 없으면 SSAP 오류', async () => {
+		inspector = await startFakeInspector({
+			evaluate: fieldPage({ value: '', editable: true, selected: false }, [])
+		});
+		ssap = await startFakeSsap({ denyIme: true });
+		driver = await WebOsDriver.connect({ config: await config('ssap') });
+		await expect(driver.typeText('bali')).rejects.toBeInstanceOf(SsapError);
+	});
+
+	it('글자 입력(CDP): 선택한 뒤 Input.insertText로 바꿔 쓰고 확인은 OK 키로 보낸다', async () => {
+		const field: FakeField = { value: 'old', editable: true, selected: false };
+		inspector = await startFakeInspector({
+			evaluate: fieldPage(field, []),
+			onMethod: (method, params) => {
+				if (method === 'Input.insertText') {
+					field.value = (field.selected ? '' : field.value) + String(params['text']);
+					field.selected = false;
+				}
+				return undefined;
+			}
+		});
+		driver = await WebOsDriver.connect({ config: await config('cdp') });
+		expect(await driver.typeText('tokyo', { replace: true, submit: true })).toEqual({ value: 'tokyo' });
+		const sent = inspector.methods.filter((m) => m.startsWith('Input.'));
+		expect(sent).toEqual(['Input.insertText', 'Input.dispatchKeyEvent', 'Input.dispatchKeyEvent']);
 	});
 
 	it('키가 앱에 도착하지 않으면 delivered=false로 기록한다', async () => {

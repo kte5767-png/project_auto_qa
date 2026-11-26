@@ -1,12 +1,26 @@
 import {
 	DEFAULT_STABLE_OPTIONS,
+	DEFAULT_TYPE_TEXT_OPTIONS,
+	TextInputError,
 	UnsupportedKeyError,
 	WEBOS_KEY_MAP,
 	cdpKeyEvents,
 	pageExpression,
-	stableWaitScript
+	stableWaitScript,
+	textChangeScript,
+	textFieldScript,
+	textNotApplied
 } from '@auto-qa/core';
-import type { Driver, RemoteKey, ScreenshotOptions, StableOptions, StableResult } from '@auto-qa/core';
+import type {
+	Driver,
+	RemoteKey,
+	ScreenshotOptions,
+	StableOptions,
+	StableResult,
+	TextFieldState,
+	TypeTextOptions,
+	TypeTextResult
+} from '@auto-qa/core';
 import type { KeyMode, WebOsDeviceConfig } from './config';
 import {
 	CdpConnection,
@@ -19,7 +33,7 @@ import {
 } from './inspector';
 import type { InspectorTarget } from './inspector';
 import { SSAP_BUTTONS, keyProbeInstallScript, keyProbeWaitScript } from './keys';
-import { DEFAULT_SSAP_MANIFEST, SsapClient } from './ssap';
+import { DEFAULT_SSAP_MANIFEST, IME_URI, SsapClient } from './ssap';
 import type { PointerSocket, SsapManifest } from './ssap';
 
 export interface KeyPressResult {
@@ -198,6 +212,50 @@ export class WebOsDriver implements Driver {
 
 	async pressKey(key: RemoteKey): Promise<void> {
 		await this.press(key);
+	}
+
+	/**
+	 * 글자 입력. SSAP 모드는 플랫폼 키보드 서비스(IME)로 넣는다 — 실제 사용자가 VKB로 치는 것과 같은 경로라
+	 * 앱 입력란이 키보드를 연 상태(OK로 편집 시작)여야 한다. 바꿔 쓰기는 커서를 끝으로 옮긴 뒤 글자 수만큼 지운다.
+	 * CDP 키 모드는 `Input.insertText`(키보드 서비스를 거치지 않음)로 넣고 확인은 OK 키로 보낸다.
+	 */
+	async typeText(text: string, options: Partial<TypeTextOptions> = {}): Promise<TypeTextResult> {
+		const o = { ...DEFAULT_TYPE_TEXT_OPTIONS, ...options };
+		const ime = this.ssap;
+		const before = await this.cdp.evaluate<TextFieldState>(textFieldScript('read'));
+		if (!before.editable) {
+			throw new TextInputError(
+				this.kind,
+				before.tag === '' ? '포커스된 입력란이 없음' : `포커스된 요소(${before.tag})가 글자를 받지 않음`
+			);
+		}
+		if (ime !== null) {
+			if (o.replace && before.value !== '') {
+				await this.cdp.evaluate(textFieldScript('end'));
+				await ime.request(IME_URI.deleteCharacters, { count: before.value.length });
+			}
+			if (text !== '') await ime.request(IME_URI.insertText, { text, replace: false });
+		} else {
+			if (o.replace) await this.cdp.evaluate(textFieldScript(text === '' ? 'clear' : 'select'));
+			if (text !== '') await this.cdp.send('Input.insertText', { text });
+		}
+		const after = await this.cdp.evaluate<TextFieldState & { changed: boolean }>(
+			textChangeScript(before.value, o.timeoutMs),
+			o.timeoutMs + 10_000
+		);
+		if (textNotApplied(before.value, after, text, o.replace)) {
+			throw new TextInputError(
+				this.kind,
+				ime === null
+					? '넣은 글자가 입력란에 반영되지 않음'
+					: '넣은 글자가 입력란에 반영되지 않음 (입력란에서 OK로 키보드를 열었는지, 페어링 권한 CONTROL_INPUT_TEXT 확인)'
+			);
+		}
+		if (o.submit) {
+			if (ime !== null) await ime.request(IME_URI.sendEnterKey);
+			else await this.press('OK');
+		}
+		return { value: after.value };
 	}
 
 	evaluate<T>(expression: string): Promise<T> {

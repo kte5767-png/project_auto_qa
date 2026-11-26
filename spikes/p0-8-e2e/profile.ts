@@ -2,6 +2,7 @@ import { isRemoteKey } from '@auto-qa/core';
 import type { RemoteKey } from '@auto-qa/core';
 import { DEFAULT_HOME_MATCH, DEFAULT_RESET_RULES } from '@auto-qa/focus';
 import type { FingerprintOptions, HomeMatchOptions, ResetRules } from '@auto-qa/focus';
+import { textValueError } from '@auto-qa/planner';
 import type { ElementDef, EntryStep, Timing } from './scenario';
 
 /**
@@ -48,6 +49,11 @@ export interface AppProfile {
 	reset?: ResetDef;
 	/** 로딩 표시 선택자 (스피너·스켈레톤). 보이는 동안은 다음 키를 누르지 않는다. 없으면 기본 선택자, ""면 끔 */
 	loading?: string;
+	/**
+	 * 글자 입력 `@data:이름`의 값 (D-043 ①). 화면설계서·TC로 정할 수 없고 앱 데이터를 알아야 하는 값만 둔다
+	 * (예: 항공권 결과가 나오는 검색어). 없으면 그 단계는 이유를 남기고 실행하지 않는다
+	 */
+	testData?: Record<string, string>;
 }
 
 export interface ResetDef {
@@ -220,6 +226,7 @@ export function entryPath(profile: AppProfile, registry: ElementRegistry, screen
 				return step.until === undefined ? step : { ...step, until: registry.resolve(s, step.until) };
 			}
 			if ('waitFor' in step) return { ...step, waitFor: registry.resolve(s, step.waitFor) };
+			if ('type' in step) return { ...step, seed: step.seed ?? s };
 			return step;
 		})
 	);
@@ -230,6 +237,13 @@ export function validateProfile(data: unknown): string[] {
 	if (typeof data !== 'object' || data === null) return ['최상위 값이 객체가 아님'];
 	const p = data as Partial<AppProfile>;
 	if (p.format !== PROFILE_FORMAT) errors.push(`format은 "${PROFILE_FORMAT}"이어야 함`);
+	if (p.testData !== undefined) {
+		const ok =
+			typeof p.testData === 'object' &&
+			p.testData !== null &&
+			Object.values(p.testData).every((v) => typeof v === 'string');
+		if (!ok) errors.push('testData는 { 이름: 글자 } 형식이어야 함');
+	}
 	if (p.reset !== undefined) {
 		const r = p.reset as Record<string, unknown>;
 		const key = (v: unknown): boolean => typeof v === 'string' && isRemoteKey(v);
@@ -270,6 +284,10 @@ export function validateProfile(data: unknown): string[] {
 					errors.push(`${at}: 모르는 키 ${String(step.else)}`);
 				if (step.until !== undefined) known(step.until, at);
 			} else if ('waitFor' in step) known(step.waitFor, at);
+			else if ('type' in step) {
+				const error = typeof step.type === 'string' ? textValueError(step.type) : '글자가 아님';
+				if (error !== null) errors.push(`${at}: ${error}`);
+			}
 		});
 	}
 	return errors;
