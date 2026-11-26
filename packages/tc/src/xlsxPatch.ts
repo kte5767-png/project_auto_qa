@@ -314,3 +314,36 @@ export function addMergeCells(sheetXml: string, refs: readonly string[]): string
 	}
 	return `${sheetXml.slice(0, at)}${block}${sheetXml.slice(at)}`;
 }
+
+/**
+ * styles.xml에 칠을 더한 칸 서식을 만든다. 기존 서식(cellXfs 번호)을 복사해 칠만 바꾸므로
+ * 글꼴·테두리·맞춤은 원래 칸과 같다. 새 서식 번호를 돌려준다. argb 예: "FFFFF2CC"
+ */
+export function addFillStyle(stylesXml: string, baseIndex: number, argb: string): { xml: string; index: number } {
+	const prefix = /<(\w+:)?styleSheet\b/.exec(stylesXml)?.[1] ?? '';
+	const fillsRe = new RegExp(`<${prefix}fills\\b([^>]*)>([\\s\\S]*?)</${prefix}fills>`);
+	const fills = fillsRe.exec(stylesXml);
+	if (fills === null) throw new Error('styles.xml에 fills가 없습니다');
+	const fillCount = (fills[2] ?? '').match(new RegExp(`<${prefix}fill\\b`, 'g'))?.length ?? 0;
+	const fill = `<${prefix}fill><${prefix}patternFill patternType="solid"><${prefix}fgColor rgb="${argb}"/><${prefix}bgColor indexed="64"/></${prefix}patternFill></${prefix}fill>`;
+	const fillsAttrs = (fills[1] ?? '').replace(/\bcount="\d+"/, `count="${fillCount + 1}"`);
+	let xml = `${stylesXml.slice(0, fills.index)}<${prefix}fills${fillsAttrs}>${fills[2] ?? ''}${fill}</${prefix}fills>${stylesXml.slice(fills.index + fills[0].length)}`;
+
+	const xfsRe = new RegExp(`<${prefix}cellXfs\\b([^>]*)>([\\s\\S]*?)</${prefix}cellXfs>`);
+	const xfs = xfsRe.exec(xml);
+	if (xfs === null) throw new Error('styles.xml에 cellXfs가 없습니다');
+	const items = [
+		...(xfs[2] ?? '').matchAll(new RegExp(`<${prefix}xf\\b[^>]*?(?:/>|>[\\s\\S]*?</${prefix}xf>)`, 'g'))
+	].map((m) => m[0]);
+	const base = items[baseIndex] ?? items[0];
+	if (base === undefined) throw new Error('styles.xml에 칸 서식(xf)이 없습니다');
+	const open = /^<[^>]*?(\/?)>/.exec(base);
+	if (open === null) throw new Error('칸 서식(xf)을 읽지 못했습니다');
+	const attrs = attributes(open[0].replace(new RegExp(`^<${prefix}xf`), '').replace(/\/?>$/, ''));
+	attrs.set('fillId', String(fillCount));
+	attrs.set('applyFill', '1');
+	const copy = `<${prefix}xf${attributeText(attrs)}${open[1] === '/' ? '/>' : `>${base.slice(open[0].length)}`}`;
+	const xfsAttrs = (xfs[1] ?? '').replace(/\bcount="\d+"/, `count="${items.length + 1}"`);
+	xml = `${xml.slice(0, xfs.index)}<${prefix}cellXfs${xfsAttrs}>${xfs[2] ?? ''}${copy}</${prefix}cellXfs>${xml.slice(xfs.index + xfs[0].length)}`;
+	return { xml, index: items.length };
+}

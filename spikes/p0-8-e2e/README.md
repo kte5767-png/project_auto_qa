@@ -62,7 +62,19 @@ pnpm spike:e2e spikes/p0-8-e2e/scenario.local.json --spec spikes/p0-8-e2e/spec -
 
 ## TC 실행 (`pnpm spike:tc-run`)
 
-TC 엑셀의 자동 대상 단계(화면설계서 번호 `--screen`, 기본 4 = 4.x)를 앱에서 실행하고, 사본 엑셀 맨 뒤에 `자동 판정`·`판정 설명`·`판정 근거`를 씁니다(D-034). 원본 P/F 열은 쓰지 않습니다.
+TC 엑셀의 자동 대상 단계(화면설계서 번호 `--screen`, 기본 4 = 4.x)를 앱에서 실행하고, **그 TC 파일에 양식 그대로** 결과를 씁니다(D-040). 열을 추가하지 않습니다.
+
+| 판정                                    | P/F 열 (그 파일의 드롭다운 값) | 이유 열 (`Issue Detail` 등)            |
+| --------------------------------------- | ------------------------------ | -------------------------------------- |
+| Pass                                    | Passed                         | 확인하지 않은 조건이 있을 때만 적음    |
+| Fail                                    | Failed                         | Fail 이유                              |
+| 확인 필요 (애매함)                      | Passed                         | `[확인 필요]` + 이유, 칸에 연한 노란색 |
+| 확인한 조건 없음·미실행·음성 안내(보류) | 비워 둠                        | 비워 둠                                |
+
+- 쓰기 전에 같은 폴더에 백업을 남깁니다: `<이름>.before-auto-qa-<시각>.xlsx`. 바뀌는 칸이 없으면 백업도 만들지 않습니다.
+- 이미 값이 있는 칸은 건드리지 않고 알려 줍니다. 다시 검수해 덮어쓰려면 `--overwrite`.
+- 엑셀에서 TC 파일을 연 채로 실행하면 쓰지 못합니다(원본은 그대로). 닫고 다시 실행하세요.
+- 조건별 근거·캡처·확인 필요 목록은 `report.md`에 있습니다.
 
 ```bash
 pnpm spike:tc-run <TC.xlsx> --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec [--only Search!9,Search!10] [--headed]
@@ -87,7 +99,7 @@ TC 한 줄은 콜아웃 하나의 사양입니다. **같은 화면의 단계들�
 | 가상 키보드                                      | 확인 불가 (브라우저에는 VKB가 없음, TV에서 확인)                                                                                                                                                           |
 | Marquee·조작 결과·미노출, AI 대상 서술           | 아직 자동 확인 없음 → 확인 필요                                                                                                                                                                            |
 
-결과: `out/tc-<시각>/`에 `report.md`, `result.json`, 단계별 캡처, 사본 엑셀(`…-auto-qa-result.xlsx`).
+결과: TC 파일(P/F·이유 칸)과 백업, `out/tc-<시각>/`에 `report.md`(확인 필요 목록 포함), `result.json`, 단계별 캡처.
 
 ### 앱 프로필 (`auto-qa/app-profile`, `*.local.json`)
 
@@ -97,10 +109,10 @@ TC 한 줄은 콜아웃 하나의 사양입니다. **같은 화면의 단계들�
 
 ### 정확도 (사람 판정과 비교)
 
-사본 엑셀의 **원래 P/F 열**에 사람이 Pass/Fail을 적고(실행된 단계만), 실행 없이 비교합니다.
+사람이 P/F를 적은 **다른 파일**(같은 TC 양식의 QA 결과 보고서 등)과 비교합니다. 실행할 때 `--truth`를 함께 주거나, 실행 없이 지난 결과로 비교합니다. 실행할 TC 파일 자체는 정답으로 쓸 수 없습니다(결과를 거기에 쓰므로).
 
 ```bash
-pnpm spike:tc-run --score spikes/p0-8-e2e/out/tc-<시각>/result.json --truth <P/F를 적은 사본.xlsx>
+pnpm spike:tc-run --score spikes/p0-8-e2e/out/tc-<시각>/result.json --truth <QA 결과 보고서.xlsx>
 ```
 
 일치율은 자동으로 Pass/Fail을 낸 단계 중 사람과 같은 비율이고, 틀린 Pass(사람 Fail인데 자동 Pass)를 따로 셉니다. 확인 필요·미실행 단계 수도 함께 보여 줍니다.

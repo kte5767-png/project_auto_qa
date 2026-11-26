@@ -33,6 +33,15 @@ describe('matchHeaderRow', () => {
 		});
 		expect(matchHeaderRow(numbered, 1)).toMatchObject({ id: 1, title: 2, caseNo: 3, step: 5, action: 6, note: 8 });
 	});
+
+	it('이유를 쓸 이슈 설명 열을 찾고, 이슈 상태·원인 열과 헷갈리지 않는다 (D-040)', () => {
+		const sheet = gridSheet('Search', [
+			['Test Case ID', 'Action', 'Expected', 'P/F', 'Issue Detail', 'Issue Status', 'Issue Cause', 'Due Date']
+		]);
+		expect(matchHeaderRow(sheet, 1)).toEqual({ id: 1, action: 2, expected: 3, result: 4, issue: 5 });
+		const korean = gridSheet('검색', [['조작', '기대 결과', '결과', '이슈 내용', '비고']]);
+		expect(matchHeaderRow(korean, 1)).toMatchObject({ result: 3, issue: 4, note: 5 });
+	});
 });
 
 describe('suggestSheetProfile', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	addFillStyle,
 	addMergeCells,
 	cellStyle,
 	escapeXml,
@@ -160,5 +161,24 @@ describe('addMergeCells', () => {
 		expect(addMergeCells(xml, ['A1:A2'])).toBe(
 			`<worksheet ${NS}><sheetData/><mergeCells count="1"><mergeCell ref="A1:A2"/></mergeCells><pageMargins left="0.7"/></worksheet>`
 		);
+	});
+});
+
+describe('addFillStyle', () => {
+	const styles =
+		'<styleSheet><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+		'<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="3" fillId="0" borderId="5" xfId="0" applyBorder="1"><alignment wrapText="1"/></xf></cellXfs></styleSheet>';
+
+	it('칠을 더하고 원래 서식(글꼴·테두리·맞춤)을 복사해 칠만 바꾼 서식 번호를 돌려준다', () => {
+		const { xml, index } = addFillStyle(styles, 1, 'FFFFF2CC');
+		expect(index).toBe(2);
+		expect(xml).toContain('<fills count="3">');
+		expect(xml).toContain('<fgColor rgb="FFFFF2CC"/>');
+		expect(xml).toContain('<cellXfs count="3">');
+		expect(xml).toContain(
+			'<xf numFmtId="0" fontId="3" fillId="2" borderId="5" xfId="0" applyBorder="1" applyFill="1"><alignment wrapText="1"/></xf></cellXfs>'
+		);
+		// 다시 더하면 다음 번호
+		expect(addFillStyle(xml, 0, 'FFFFF2CC').index).toBe(3);
 	});
 });
