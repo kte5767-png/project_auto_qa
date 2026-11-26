@@ -13,6 +13,8 @@ spikes/*/out/
 
 # Figma 플러그인 내보내기 파일 (디자인 내용이 들어 있음)
 *-auto-qa-*.json
+# 수작업 정답 등 회사 디자인 정보가 담긴 로컬 파일
+*.local.json
 playwright-report/
 test-results/
 

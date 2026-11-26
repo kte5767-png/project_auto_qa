@@ -6,22 +6,31 @@ import type { FigmaExport, FrameAnalysis } from '@auto-qa/figma';
 import { sampleExport, sampleHomeFrame } from '@auto-qa/figma/testing';
 import { extractSpecScreen } from '@auto-qa/spec';
 import type { SpecScreen } from '@auto-qa/spec';
-import { sampleSpecPage } from '@auto-qa/spec/testing';
+import { sampleGuiFrame, sampleSpecPage } from '@auto-qa/spec/testing';
+import { linkAll, measure, renderLinks } from './link';
+import type { FrameSource, Truth } from './link';
 
 /**
  * P0-5 Figma 내보내기 스파이크.
  *   pnpm spike:figma <내보내기.json...> [--out 폴더]
  *   pnpm spike:figma --sample          # 합성 데이터로 확인
+ *   pnpm spike:figma <화면설계서.json> <GUI.json> [--truth 정답.local.json]
  * 파일마다 out/<이름>/ 에 analysis.json, report.html 을 만든다. out/ 은 커밋하지 않는다 (디자인 내용이 들어 있음).
+ * 화면설계서와 GUI 프레임이 모두 있으면 out/link/ 에 연결 리포트를 만든다 (파일 여러 개를 합쳐서 본다).
+ * 정답 파일은 회사 디자인 정보가 들어 있으므로 *.local.json 으로 두고 커밋하지 않는다.
  */
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
 	options: {
 		out: { type: 'string', default: join(import.meta.dirname, 'out') },
-		sample: { type: 'boolean', default: false }
+		sample: { type: 'boolean', default: false },
+		truth: { type: 'string' }
 	}
 });
+
+/** pnpm 스크립트는 패키지 폴더에서 돌므로, 상대 경로는 명령을 친 폴더(INIT_CWD) 기준으로 푼다 */
+const fromCwd = (path: string): string => resolve(process.env.INIT_CWD ?? process.cwd(), path);
 
 if (positionals.length === 0 && !values.sample) {
 	console.error('사용법: pnpm spike:figma <내보내기.json...> [--out 폴더] | --sample');
@@ -180,10 +189,14 @@ ${s.groups.map((g, i) => `<tr><td><span style="color:${COLORS[i % COLORS.length]
 </section>`;
 }
 
+/** 모든 파일의 프레임 (같은 id는 나중 파일 것) — 연결 리포트용 */
+const allFrames = new Map<string, FrameSource>();
+
 async function run(name: string, data: FigmaExport): Promise<void> {
 	const out = join(resolve(values.out), name);
 	await mkdir(out, { recursive: true });
 	const analyses = analyzeExport(data);
+	analyses.forEach((a, i) => allFrames.set(a.frame.id, { analysis: a, image: data.frames[i]?.image?.data ?? null }));
 	await writeFile(
 		join(out, 'analysis.json'),
 		`${JSON.stringify({ file: data.file, warnings: data.warnings, frames: analyses.map(summary) }, null, '\t')}\n`
@@ -219,13 +232,64 @@ ${analyses.map((a, i) => renderFrame(a, data.frames[i]?.image?.data ?? null)).jo
 }
 
 if (values.sample) {
-	const data = sampleExport([sampleHomeFrame(), sampleSpecPage()]);
+	const data = sampleExport([
+		sampleHomeFrame(),
+		sampleSpecPage(),
+		sampleGuiFrame('keyboard'),
+		sampleGuiFrame('closed')
+	]);
 	await mkdir(resolve(values.out), { recursive: true });
 	await writeFile(join(resolve(values.out), 'sample-export.json'), JSON.stringify(data));
 	await run('sample', data);
 }
 for (const file of positionals) {
-	const path = resolve(file);
+	const path = fromCwd(file);
 	const data = parseExport(JSON.parse(await readFile(path, 'utf8')));
 	await run(basename(path, extname(path)).replace(/[^\w.-]+/g, '_'), data);
+}
+
+const frames = [...allFrames.values()];
+if (frames.some((f) => f.analysis.kind === 'spec') && frames.some((f) => f.analysis.kind === 'gui')) {
+	const truth =
+		values.truth === undefined ? null : (JSON.parse(await readFile(fromCwd(values.truth), 'utf8')) as Truth);
+	const results = linkAll(frames);
+	const measured = truth === null ? null : measure(results, truth);
+	const out = join(resolve(values.out), 'link');
+	await mkdir(out, { recursive: true });
+	await writeFile(join(out, 'report.html'), renderLinks(results, frames, truth, measured));
+	await writeFile(
+		join(out, 'link.json'),
+		`${JSON.stringify(
+			results.map((r) => ({
+				screen: r.merged.screenId,
+				title: r.merged.title,
+				diagnostics: r.merged.diagnostics,
+				parts: r.parts.map((p) => ({ title: p.spec.title, pair: p.link.pair, candidates: p.link.candidates })),
+				callouts: r.callouts
+			})),
+			null,
+			'\t'
+		)}\n`
+	);
+	console.log('\n화면설계서 ↔ GUI 연결');
+	for (const r of results) {
+		const pairs = [
+			...new Set(
+				r.parts.map((p) => `${p.link.pair?.guiFrameName ?? '짝 없음'}${p.link.ambiguous ? ' (확인 필요)' : ''}`)
+			)
+		].join(', ');
+		const found = r.callouts.filter((c) => c.link?.element != null).length;
+		console.log(
+			`  ${r.merged.screenId ?? '?'} ${r.merged.title ?? ''} (${r.parts.length}장) → ${pairs} · 콜아웃 ${found}/${r.callouts.length} 대응`
+		);
+	}
+	if (measured !== null) {
+		console.log(
+			`  정확도: 화면 짝 ${measured.pairs.correct}/${measured.pairs.total}, 콜아웃 → GUI 요소 ${measured.callouts.correct}/${measured.callouts.total}`
+		);
+		for (const w of [...measured.pairs.wrong, ...measured.callouts.wrong]) console.log(`    틀림 ${w}`);
+		if (measured.callouts.unjudged.length > 0)
+			console.log(`    정답 없음: ${measured.callouts.unjudged.join(', ')}`);
+	}
+	console.log(`  → ${join(out, 'report.html')}`);
 }
