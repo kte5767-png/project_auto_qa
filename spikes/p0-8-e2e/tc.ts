@@ -45,6 +45,7 @@ import {
 import type { ResultWrite, StepResult, TcCase, TcStep } from '@auto-qa/tc';
 import {
 	DEFAULT_LOADING_SELECTOR,
+	KEY_LABEL,
 	Session,
 	checkSpecMove,
 	focusText,
@@ -56,7 +57,15 @@ import {
 	viewOptions
 } from './common';
 import type { Trail } from './common';
-import { PROFILE_FORMAT, buildRegistry, calloutMark, entryPath, resetConfig, validateProfile } from './profile';
+import {
+	PROFILE_FORMAT,
+	buildRegistry,
+	calloutMark,
+	entryPath,
+	isCancelText,
+	resetConfig,
+	validateProfile
+} from './profile';
 import type { AppProfile, ElementRegistry } from './profile';
 import { DEFAULT_TIMING } from './scenario';
 import type { Timing } from './scenario';
@@ -144,6 +153,8 @@ interface ScreenSession {
 	/** 그 화면에 막 들어왔을 때의 관찰 (진입 시 포커스 확인용) */
 	entryObs: Observation;
 	opened: number;
+	/** 진입을 마쳤을 때의 키 수. 같으면 진입 직후(아직 아무 키도 안 누름) */
+	freshAt: number;
 }
 
 /** 열려 있는 앱: 드라이버 하나를 계속 쓰고, 처음 화면 지문을 기억한다 (D-039) */
@@ -176,6 +187,8 @@ class Runner {
 	opens = 0;
 	/** 처음 화면으로 키로 되돌린 횟수 */
 	resets = 0;
+	/** 키 확인 결과 (화면|콜아웃|키) — 같은 확인은 한 번만 실행 */
+	readonly moves = new Map<string, ReturnType<typeof checkSpecMove>>();
 	readonly reset: ReturnType<typeof resetConfig>;
 
 	constructor(readonly ctx: Ctx) {
@@ -218,10 +231,59 @@ class Runner {
 	 * 안 되면 앱을 다시 연다. 오류 문장 또는 null
 	 */
 	private async resetHome(trail: Trail[]): Promise<string | null> {
+		try {
+			return await this.resetHomeOnce(trail);
+		} catch (error) {
+			// 앱이 꺼져 창이 닫혔으면(종료 버튼 등) 멈추지 않고 다시 연다
+			const why = error instanceof Error ? error.message.split('\n')[0] : String(error);
+			record(
+				trail,
+				{ key: null, focus: `다시 열기 (앱 창이 닫힘: ${why ?? ''})`, stable: true },
+				'      홈으로 '
+			);
+			return this.launch(trail);
+		}
+	}
+
+	/**
+	 * BACK으로 닫히지 않는 팝업에서 취소 버튼을 고른다: 지금 포커스 글자가 취소면 OK, 아니면 방향키를 하나씩 눌러 보며
+	 * 팝업 안에서 취소 글자 버튼을 찾는다. 나가기 글자 버튼에서는 OK를 누르지 않는다
+	 */
+	private async chooseCancel(driver: BrowserDriver, popup: ScreenFingerprint, trail: Trail[]): Promise<boolean> {
+		const probe = this.probe(driver);
+		const { cancelWords, exitWords } = this.reset;
+		const keys: RemoteKey[] = ['DOWN', 'RIGHT', 'UP', 'LEFT', 'DOWN', 'RIGHT'];
+		for (let i = 0; i <= keys.length; i++) {
+			const obs = await probe.observe();
+			const text = obs.focus?.text ?? '';
+			if (isCancelText(text, cancelWords, exitWords)) {
+				await driver.pressKey('OK');
+				await driver.waitForStable();
+				await probe.settle(this.ctx.timing.readyTimeoutMs);
+				record(trail, { key: 'OK', focus: `팝업 "${text}" 버튼으로 닫기`, stable: true }, '      홈으로 ');
+				const after = await takeFingerprint(driver, this.reset.fingerprint);
+				return after.layers.length < popup.layers.length;
+			}
+			const key = keys[i];
+			if (key === undefined) break;
+			await driver.pressKey(key);
+			await driver.waitForStable();
+			record(
+				trail,
+				{ key, focus: `팝업 취소 버튼 찾기 ("${text.slice(0, 20)}")`, stable: true },
+				'      홈으로 '
+			);
+		}
+		return false;
+	}
+
+	private async resetHomeOnce(trail: Trail[]): Promise<string | null> {
 		const app = this.app;
 		if (app === null) return this.launch(trail);
 		const { ctx } = this;
 		const state = { top: 0 };
+		// 화면에는 한 줄로 요약한다 (키마다의 이유는 리포트 기록에만)
+		const keys: string[] = [];
 		const take = (): Promise<ScreenFingerprint> => takeFingerprint(app.driver, this.reset.fingerprint);
 		for (let i = 0; i <= ctx.timing.maxResetKeys; i++) {
 			let now = await take();
@@ -240,14 +302,18 @@ class Runner {
 			if (step.kind === 'done') {
 				if (i > 0) {
 					this.resets++;
-					record(trail, { key: null, focus: step.reason, stable: true }, '      처음으로 ');
+					record(
+						trail,
+						{ key: null, focus: `${keys.join(' ')} → 홈 (${step.reason})`, stable: true },
+						'      홈으로 '
+					);
 				}
 				return null;
 			}
 			if (step.kind === 'relaunch' || i === ctx.timing.maxResetKeys) {
 				const why =
 					step.kind === 'relaunch' ? step.reason : `키 ${ctx.timing.maxResetKeys}번 안에 처음 화면에 못 옴`;
-				record(trail, { key: null, focus: `다시 열기 (${why})`, stable: true }, '      처음으로 ');
+				record(trail, { key: null, focus: `다시 열기 (${why})`, stable: true }, '      홈으로 ');
 				return this.launch(trail);
 			}
 			if (step.kind !== 'press') continue;
@@ -255,17 +321,27 @@ class Runner {
 			const st = await app.driver.waitForStable();
 			await this.probe(app.driver).settle(ctx.timing.readyTimeoutMs);
 			// 팝업(종료 팝업)을 닫았거나 BACK에 화면이 그대로면 최상위에 닿은 것
-			const noEffect = step.key === this.reset.rules.backKey && sameFingerprint(now, await take());
+			let noEffect = step.key === this.reset.rules.backKey && sameFingerprint(now, await take());
+			if (noEffect && step.closes === 'popup') {
+				// BACK으로 안 닫히는 팝업: 취소 글자 버튼으로 가서 OK (나가기 버튼에서는 누르지 않음)
+				const closed = await this.chooseCancel(app.driver, now, trail);
+				noEffect = false;
+				if (!closed) {
+					record(
+						trail,
+						{ key: null, focus: '다시 열기 (팝업의 취소 버튼을 찾지 못함)', stable: true },
+						'      홈으로 '
+					);
+					return this.launch(trail);
+				}
+			}
 			if (step.closes === 'popup' || noEffect) state.top++;
-			record(
-				trail,
-				{
-					key: step.key,
-					focus: noEffect ? `${step.reason} (반응 없음 → 최상위)` : step.reason,
-					stable: st.stable
-				},
-				'      처음으로 '
-			);
+			keys.push(KEY_LABEL[step.key] ?? step.key);
+			trail.push({
+				key: step.key,
+				focus: noEffect ? `${step.reason} (반응 없음 → 최상위)` : step.reason,
+				stable: st.stable
+			});
 		}
 		return this.launch(trail);
 	}
@@ -283,7 +359,13 @@ class Runner {
 			if (shown === null) error = `${screen} 화면 표시(detect)가 보이지 않음`;
 		}
 		if (error !== null) return error;
-		this.current = { screen, session, entryObs: await session.observe(), opened: this.opens };
+		this.current = {
+			screen,
+			session,
+			entryObs: await session.observe(),
+			opened: this.opens,
+			freshAt: session.presses
+		};
 		return null;
 	}
 
@@ -324,7 +406,7 @@ class Runner {
 			const session = this.newSession(screen);
 			const obs = await session.observe();
 			if (this.shown(obs, screen)) {
-				this.current = { screen, session, entryObs: cur.entryObs, opened: cur.opened };
+				this.current = { screen, session, entryObs: cur.entryObs, opened: cur.opened, freshAt: -1 };
 				record(
 					trail,
 					{ key: null, focus: `${cur.screen}와 같은 화면이 떠 있어 이어서 씀`, stable: true },
@@ -359,55 +441,24 @@ class Runner {
 		);
 	}
 
-	/**
-	 * 화면 밖으로 나간 포커스를 화면 안으로 되돌린다: 그 화면이 안 보이거나 다른 화면(팝업 등)에 포커스가 있으면 BACK,
-	 * 포커스가 공통 요소(GNB 등)에 있으면 그 요소의 exit 키. 앱을 다시 열지 않는다.
-	 * in = 화면 콜아웃에 포커스, shown = 화면은 보이고 포커스는 콜아웃 밖(방향 탐색으로 갈 수 있음), lost = 되돌리지 못함
-	 */
-	async returnInto(screen: string, trail: Trail[]): Promise<'in' | 'shown' | 'lost'> {
-		for (let i = 0; i <= this.ctx.timing.maxReturnKeys; i++) {
-			let obs = await this.session.observe();
-			if (this.inScreen(obs, screen)) return 'in';
-			if (obs.focus === null && this.shown(obs, screen)) {
-				// 화면 전환 중이면 포커스가 생길 때까지 기다린다
-				obs = (await this.session.until((o) => o.focus !== null, 3000)) ?? obs;
-				if (this.inScreen(obs, screen)) return 'in';
-			}
-			if (i === this.ctx.timing.maxReturnKeys) break;
-			const inOther = Object.keys(this.ctx.profile.screens).some(
-				(sc) =>
-					sc !== screen &&
-					target(obs, this.ctx.registry.detect(sc))?.hasFocus === true &&
-					!this.sameDetect(sc, screen)
-			);
-			let key: RemoteKey | null = null;
-			if (!this.shown(obs, screen) || inOther) key = 'BACK';
-			else {
-				for (const [name, e] of Object.entries(this.ctx.profile.elements ?? {})) {
-					if (e.exit !== undefined && target(obs, name)?.hasFocus === true) key = e.exit;
-				}
-			}
-			if (key === null) return obs.focus !== null && this.shown(obs, screen) ? 'shown' : 'lost';
-			const r = await this.session.press(key);
-			record(trail, { key, focus: focusText(r.obs), stable: r.stable }, '      돌아오기 ');
-		}
-		return 'lost';
+	/** 이 화면에 막 들어온 상태인가 (아직 아무 키도 안 누름) */
+	fresh(screen: string): boolean {
+		const cur = this.current;
+		return cur !== null && cur.screen === screen && cur.session.presses === cur.freshAt;
 	}
 
-	/** 목표 콜아웃 첫 항목으로: 키로 돌아오기 → 이동 지도 길 → (없으면) 방향 탐색 → 안 되면 앱 다시 열기 */
+	/**
+	 * 목표 콜아웃 첫 항목으로 (단순화, D-042): 진입 직후가 아니면 홈으로 돌아가(재시작 아님) 그 화면에 다시 들어간 뒤,
+	 * 이동 지도의 길(없으면 목표 쪽 방향키)로 간다. 앞 확인에서 누른 키의 영향이 남지 않는다
+	 */
 	async reach(screen: string, no: string, trail: Trail[]): Promise<Miss | null> {
-		const first = await this.tryReach(screen, no, trail);
-		if (first === null || !first.again) return first;
-		record(trail, { key: null, focus: `처음 화면부터 다시 (${first.reason})`, stable: true }, '      ');
-		const error = await this.open(screen, trail);
-		if (error !== null) return { reason: `처음 화면부터 다시 가지 못함: ${error}`, again: false };
+		if (!this.fresh(screen)) {
+			const error = await this.open(screen, trail);
+			if (error !== null) return { reason: `진입 실패: ${error}`, again: false };
+		}
 		return this.tryReach(screen, no, trail);
 	}
 
-	/**
-	 * 목표 첫 항목에 갈 때까지 반복: 콜아웃에 있으면 이동 지도로 길을 계산해 따라가고, 길이 없거나 콜아웃 밖이면
-	 * 목표 쪽 방향키 한 번(목표 지향 탐색, D-024), 목록 안이면 "이전" 키로 첫 항목까지. 같은 자리를 다시 만나면 멈춘다.
-	 */
 	private async tryReach(screen: string, no: string, trail: Trail[]): Promise<Miss | null> {
 		const { ctx } = this;
 		const name = ctx.registry.callout(screen, no) ?? '';
@@ -415,8 +466,6 @@ class Runner {
 			const t = target(o, name);
 			return t?.hasFocus === true && (t.itemCount <= 1 || t.focusItem === 0);
 		};
-		const where = await this.returnInto(screen, trail);
-		if (where === 'lost') return { reason: `포커스를 ${screen} 화면으로 되돌리지 못함`, again: true };
 		const actions = ctx.keyMaps?.get(screen) ?? [];
 		const prevKey = listPrevKey(actions, no) ?? 'LEFT';
 		const seen = new Set<string>();
@@ -456,7 +505,7 @@ class Runner {
 		const obs = await this.session.observe();
 		if (at(obs)) return null;
 		const why = `${noRoute === null ? '' : `이동 지도에 길 없음(${noRoute}), `}방향 탐색으로도 ${calloutMark(no)}에 가지 못함 (실제 ${focusText(obs)})`;
-		return { reason: why, again: where === 'shown' };
+		return { reason: why, again: false };
 	}
 
 	private async step(key: RemoteKey, trail: Trail[], label: string): Promise<Observation> {
@@ -553,7 +602,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 
 	const entryError = await runner.ensure(screen, trail);
 	if (entryError !== null) return notRun(`진입 실패: ${entryError}`);
-	if ((await runner.returnInto(screen, trail)) === 'lost') {
+	if (!runner.shown(await runner.session.observe(), screen)) {
 		const error = await runner.open(screen, trail);
 		if (error !== null) return notRun(`진입 실패: ${error}`);
 	}
@@ -692,15 +741,31 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 			results.push(res(clause, check, 'needs-review', blocked));
 			continue;
 		}
+		const key = KEY_OF[String(check.value)];
+		if (key === undefined) {
+			results.push(res(clause, check, null, `모르는 키 ${String(check.value)}`));
+			continue;
+		}
+		// 같은 화면·같은 출발(콜아웃 첫 항목)·같은 키는 매번 홈에서 새로 들어가 확인하므로 결과가 같다 → 한 번만 실행
+		const cacheKey = `${screen}|${no}|${key}`;
+		const cached = runner.moves.get(cacheKey);
+		if (cached !== undefined) {
+			results.push({ ...cached, clause, check });
+			record(
+				trail,
+				{
+					key,
+					focus: `앞 단계 결과 재사용 (${VERDICT_LABEL[cached.verdict ?? 'needs-review']})`,
+					stable: true
+				},
+				'    '
+			);
+			continue;
+		}
 		const miss = await runner.reach(screen, no, trail);
 		if (miss !== null) {
 			blocked = miss.reason;
 			results.push(res(clause, check, 'needs-review', miss.reason));
-			continue;
-		}
-		const key = KEY_OF[String(check.value)];
-		if (key === undefined) {
-			results.push(res(clause, check, null, `모르는 키 ${String(check.value)}`));
 			continue;
 		}
 		const before = await runner.session.observe();
@@ -716,6 +781,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 			remembered
 		);
 		results.push({ ...move, clause, check });
+		runner.moves.set(cacheKey, move);
 		if (move.verdict !== null && move.verdict !== 'pass') {
 			console.log(`      [${VERDICT_LABEL[move.verdict]}] ${move.explanation}`);
 		}

@@ -142,7 +142,11 @@ export class Session {
 		return obs;
 	}
 
+	/** 이 세션에서 누른 키 수 (진입 직후인지 보는 데 쓴다) */
+	presses = 0;
+
 	async press(key: RemoteKey): Promise<{ obs: Observation; stable: boolean }> {
+		this.presses++;
 		await this.driver.pressKey(key);
 		const s = await this.driver.waitForStable();
 		let obs = await this.observe();
