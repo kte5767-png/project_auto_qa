@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OllamaClient } from '../ollama';
 import type { FakeChatRequest, FakeOllama } from '../testing';
 import { startFakeOllama } from '../testing';
-import type { JudgeCase, LlmCase, PlanCase } from './cases';
+import type { JudgeCase, LlmCase, PlanCase, TargetCase } from './cases';
 import { CASE_FORMAT, parseCaseFile } from './cases';
 import { compareModels, DEFAULT_COMPARE_OPTIONS, rankModels, summarize } from './compare';
-import { messagesFor, PROMPT_VERSION } from './prompts';
+import { messagesFor, PROMPT_VERSION, schemaFor } from './prompts';
 import { renderReport } from './report';
-import { decisionOf, keySimilarity, scoreCase } from './score';
+import { decisionKey, decisionOf, keySimilarity, scoreCase } from './score';
 
 const judge: JudgeCase = {
 	id: 'j1',
@@ -32,6 +32,43 @@ const plan: PlanCase = {
 	},
 	answer: { keys: ['DOWN', 'RIGHT'] }
 };
+
+const target: TargetCase = {
+	id: 't1',
+	task: 'target',
+	step: '추천 키워드 세 번째 항목으로 검색한다',
+	screen: {
+		name: '검색',
+		focus: '① 검색창',
+		callouts: [
+			{ no: '①', label: '검색창' },
+			{ no: '②', label: '추천 키워드', items: ['A', 'B', 'C'] }
+		]
+	},
+	answer: { callout: '②', item: 3, finish: 'OK' }
+};
+
+describe('목표 고르기 케이스 (D-036)', () => {
+	it('케이스 파일에서 정답 콜아웃이 화면에 있는지 확인한다', () => {
+		const file = (answer: unknown): unknown => ({
+			format: CASE_FORMAT,
+			version: 1,
+			cases: [{ ...target, answer }]
+		});
+		expect(parseCaseFile(file(target.answer)).cases).toHaveLength(1);
+		expect(() => parseCaseFile(file({ callout: '⑨', item: 0, finish: 'HOME' }))).toThrow(
+			/callout은 screen.callouts의 no[\s\S]*item은 1 이상[\s\S]*finish는 OK \| BACK \| NONE/
+		);
+	});
+
+	it('답안 형식은 그 화면의 콜아웃 번호만 허용하고, 프롬프트에 항목 이름을 넣는다', () => {
+		const schema = schemaFor(target);
+		expect(schema.properties?.['callout']?.enum).toEqual(['①', '②']);
+		const [system, user] = messagesFor(target);
+		expect(system?.content).toContain('키 순서는 만들지 않는다');
+		expect(user?.content).toContain('- ② 추천 키워드 — 항목: A, B, C');
+	});
+});
 
 let fake: FakeOllama | undefined;
 afterEach(async () => {
@@ -80,11 +117,26 @@ describe('프롬프트', () => {
 describe('채점', () => {
 	it('판정: 틀린 pass/fail 단정은 확신 오답, uncertain은 아님', () => {
 		const d = (verdict: string) => decisionOf('judge', { verdict, confidence: 0.9, reason: '' });
-		expect(scoreCase(judge, d('pass'))).toEqual({ correct: true, partial: 1, confidentWrong: false });
-		expect(scoreCase(judge, d('fail'))).toEqual({ correct: false, partial: 0, confidentWrong: true });
-		expect(scoreCase(judge, d('uncertain'))).toEqual({ correct: false, partial: 0, confidentWrong: false });
+		expect(scoreCase(judge, d('pass'))).toEqual({
+			correct: true,
+			partial: 1,
+			confidentWrong: false,
+			falsePass: false
+		});
+		expect(scoreCase(judge, d('fail'))).toEqual({
+			correct: false,
+			partial: 0,
+			confidentWrong: true,
+			falsePass: false
+		});
+		expect(scoreCase(judge, d('uncertain'))).toEqual({
+			correct: false,
+			partial: 0,
+			confidentWrong: false,
+			falsePass: false
+		});
 		const unobservable: JudgeCase = { ...judge, answer: { verdict: 'uncertain' } };
-		expect(scoreCase(unobservable, d('pass')).confidentWrong).toBe(true);
+		expect(scoreCase(unobservable, d('pass'))).toMatchObject({ confidentWrong: true, falsePass: true });
 		expect(decisionOf('judge', { verdict: 'maybe' })).toBeNull();
 	});
 
@@ -94,7 +146,17 @@ describe('채점', () => {
 		expect(scoreCase(plan, d(['DOWN']))).toMatchObject({ correct: false, partial: 0.5 });
 		expect(keySimilarity([], [])).toBe(1);
 		expect(keySimilarity(['UP', 'OK'], ['DOWN', 'OK', 'OK'])).toBe(0.333);
-		expect(scoreCase(plan, null)).toEqual({ correct: false, partial: 0, confidentWrong: false });
+		expect(scoreCase(plan, null)).toEqual({ correct: false, partial: 0, confidentWrong: false, falsePass: false });
+	});
+
+	it('목표: 콜아웃·순번·마지막 키가 모두 맞아야 정답, 부분 점수는 콜아웃 0.5 + 순번 0.25 + 키 0.25', () => {
+		const d = (callout: string, item: number, finish: string) =>
+			decisionOf('target', { callout, item, finish, confidence: 0.8, reason: '' });
+		expect(scoreCase(target, d('②', 3, 'OK'))).toMatchObject({ correct: true, partial: 1 });
+		expect(scoreCase(target, d('②', 2, 'OK'))).toMatchObject({ correct: false, partial: 0.75 });
+		expect(scoreCase(target, d('③', 3, 'NONE'))).toMatchObject({ correct: false, partial: 0 });
+		expect(decisionKey(d('②', 3, 'OK'))).toBe('②#3 OK');
+		expect(decisionOf('target', { callout: '②', item: 1, finish: 'HOME' })).toBeNull();
 	});
 });
 
@@ -181,7 +243,9 @@ describe('compareModels', () => {
 			finishedAt: 'b',
 			caseFiles: ['sample.json']
 		});
-		expect(report).toContain('| 1 | vision:4b | 100% | 50% | 0% | 2 | 100% | 1 | 100% |');
+		expect(report).toContain(
+			'| 1 | vision:4b | 100% | 50% | 0% | 2 | 2 | 0.9 / 0.9 (구분 안 됨) | - | - | 100% | 100% |'
+		);
 		expect(report).toContain('| j2 검색창 포커스 | fail | ✗ pass / ✗ pass | 건너뜀 |');
 		expect(report).toContain('- none:1b: 설치되지 않음 — ollama pull none:1b');
 		expect(report).toContain('- j2: pass — 검색창에 포커스');

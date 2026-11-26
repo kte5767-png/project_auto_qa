@@ -1,4 +1,5 @@
-import type { LlmCase, PlanKey, Task, Verdict } from './cases';
+import type { FinishKey, LlmCase, PlanKey, Task, Verdict } from './cases';
+import { FINISH_KEYS } from './cases';
 
 export interface Decision {
 	task: Task;
@@ -7,6 +8,7 @@ export interface Decision {
 	confidence: number | null;
 	reason: string | null;
 	check: string | null;
+	target: { callout: string; item: number; finish: FinishKey } | null;
 }
 
 /** 스키마 검사를 통과한 출력에서 판단 부분만 꺼낸다 */
@@ -18,7 +20,23 @@ export function decisionOf(task: Task, json: unknown): Decision | null {
 	if (task === 'judge') {
 		const verdict = o['verdict'];
 		if (verdict !== 'pass' && verdict !== 'fail' && verdict !== 'uncertain') return null;
-		return { task, verdict, keys: null, confidence, reason, check: null };
+		return { task, verdict, keys: null, confidence, reason, check: null, target: null };
+	}
+	if (task === 'target') {
+		const callout = o['callout'];
+		const item = o['item'];
+		const finish = o['finish'];
+		if (typeof callout !== 'string' || typeof item !== 'number' || !FINISH_KEYS.includes(finish as FinishKey))
+			return null;
+		return {
+			task,
+			verdict: null,
+			keys: null,
+			confidence,
+			reason,
+			check: null,
+			target: { callout, item, finish: finish as FinishKey }
+		};
 	}
 	if (!Array.isArray(o['keys'])) return null;
 	return {
@@ -27,13 +45,22 @@ export function decisionOf(task: Task, json: unknown): Decision | null {
 		keys: o['keys'] as PlanKey[],
 		confidence,
 		reason,
-		check: typeof o['check'] === 'string' ? o['check'] : null
+		check: typeof o['check'] === 'string' ? o['check'] : null,
+		target: null
 	};
 }
 
 /** 반복 일치 비교용: 판단 부분만 (설명 문장은 빼고) */
 export const decisionKey = (d: Decision | null): string =>
-	d === null ? '(없음)' : d.task === 'judge' ? (d.verdict ?? '?') : (d.keys ?? []).join(' ');
+	d === null
+		? '(없음)'
+		: d.task === 'judge'
+			? (d.verdict ?? '?')
+			: d.task === 'target'
+				? d.target === null
+					? '?'
+					: `${d.target.callout}#${d.target.item} ${d.target.finish}`
+				: (d.keys ?? []).join(' ');
 
 /** 키 순서 유사도: 1 - 편집 거리 / 긴 쪽 길이 */
 export function keySimilarity(a: readonly string[], b: readonly string[]): number {
@@ -62,16 +89,32 @@ export interface CaseScore {
 	partial: number;
 	/** 판정: 틀린 pass/fail을 단정함 (확인할 수 없는 것을 pass라고 한 경우 포함) — 가장 위험한 오류. uncertain은 해당 없음 */
 	confidentWrong: boolean;
+	/** 판정: 정답이 pass가 아닌데 pass라고 함 (결함을 놓침, D-036 ④) */
+	falsePass: boolean;
 }
 
 export function scoreCase(c: LlmCase, d: Decision | null): CaseScore {
-	if (d === null) return { correct: false, partial: 0, confidentWrong: false };
+	if (d === null) return { correct: false, partial: 0, confidentWrong: false, falsePass: false };
 	if (c.task === 'judge') {
 		const correct = d.verdict === c.answer.verdict;
 		const confidentWrong = !correct && (d.verdict === 'pass' || d.verdict === 'fail');
-		return { correct, partial: correct ? 1 : 0, confidentWrong };
+		return { correct, partial: correct ? 1 : 0, confidentWrong, falsePass: !correct && d.verdict === 'pass' };
+	}
+	if (c.task === 'target') {
+		const t = d.target;
+		if (t === null) return { correct: false, partial: 0, confidentWrong: false, falsePass: false };
+		const callout = t.callout === c.answer.callout;
+		const item = t.item === c.answer.item;
+		const finish = t.finish === c.answer.finish;
+		return {
+			correct: callout && item && finish,
+			// 콜아웃 0.5 + 순번 0.25 + 마지막 키 0.25
+			partial: (callout ? 0.5 : 0) + (callout && item ? 0.25 : 0) + (finish ? 0.25 : 0),
+			confidentWrong: false,
+			falsePass: false
+		};
 	}
 	const keys = d.keys ?? [];
 	const correct = keys.length === c.answer.keys.length && keys.every((k, i) => k === c.answer.keys[i]);
-	return { correct, partial: keySimilarity(keys, c.answer.keys), confidentWrong: false };
+	return { correct, partial: keySimilarity(keys, c.answer.keys), confidentWrong: false, falsePass: false };
 }
