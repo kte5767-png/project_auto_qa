@@ -153,3 +153,84 @@ function offset(n: ExportedNode, dx: number, dy: number): ExportedNode {
 		children: n.children.map((c) => offset(c, dx, dy))
 	};
 }
+
+/**
+ * 위 화면설계서(2.1.1 샘플 화면)에 대응하는 합성 GUI 프레임 (1920×1080).
+ * - keyboard: 화면설계서와 같은 상태 (강조 줄 + 오른쪽 키보드). "Popular" 대신 "Popular Now"로 글자가 다르다
+ * - closed: 같은 화면의 키보드 닫힌 변형 (강조 줄·키보드 없음)
+ */
+export function sampleGuiFrame(variant: 'keyboard' | 'closed', id = `8:gui-${variant}`): ExportedFrame {
+	resetIds(variant === 'keyboard' ? 2000 : 3000);
+	const dark = solid(0.15, 0.15, 0.15);
+	const children: ExportedNode[] = [
+		node(
+			'FRAME',
+			{ x: 480, y: 40, width: 960, height: 72 },
+			{ name: 'search form', fills: [dark], children: [t('Search here', 530, 60, 300, 32, 24)] }
+		),
+		node(
+			'FRAME',
+			{ x: 1830, y: 60, width: 48, height: 48 },
+			{
+				name: 'btn_setting',
+				children: [
+					node('VECTOR', { x: 1840, y: 70, width: 28, height: 28 }, { name: 'icon', fills: [solid(1, 1, 1)] })
+				]
+			}
+		),
+		t('Popular Now', 210, 180, 220, 40, 28),
+		node(
+			'FRAME',
+			{ x: 210, y: 240, width: 900, height: 60 },
+			{ name: 'chips', children: [t('Walking', 230, 255, 120, 30), t('Driving', 400, 255, 120, 30)] }
+		),
+		t('Trending', 210, 896, 200, 40, 28),
+		node('FRAME', { x: 210, y: 950, width: 600, height: 100 }, { name: 'cards', fills: [IMAGE] })
+	];
+	if (variant === 'keyboard') {
+		children.push(
+			node(
+				'FRAME',
+				{ x: 0, y: 560, width: 1920, height: 90 },
+				{ name: 'strip', fills: [dark], children: [t('sample keyword', 300, 590, 200, 30)] }
+			),
+			node(
+				'FRAME',
+				{ x: 1050, y: 655, width: 870, height: 230 },
+				{
+					name: 'keyboard',
+					fills: [dark],
+					children: [
+						node(
+							'RECTANGLE',
+							{ x: 1080, y: 670, width: 120, height: 60 },
+							{ fills: [solid(0.3, 0.3, 0.3)] }
+						),
+						node(
+							'RECTANGLE',
+							{ x: 1220, y: 670, width: 120, height: 60 },
+							{ fills: [solid(0.3, 0.3, 0.3)] }
+						)
+					]
+				}
+			)
+		);
+	}
+	const name = variant === 'keyboard' ? '2.1.1 Sample_샘플 화면 진입' : '2.1.1 Sample_샘플 화면 키보드 닫힘';
+	return {
+		pageId: '0:4',
+		pageName: 'GUI',
+		image: null,
+		node: node(
+			'FRAME',
+			{ x: 8000, y: 0, width: 1920, height: 1080 },
+			{
+				name,
+				id,
+				clipsContent: true,
+				fills: [solid(0, 0, 0)],
+				children: children.map((n) => offset(n, 8000, 0))
+			}
+		)
+	};
+}
