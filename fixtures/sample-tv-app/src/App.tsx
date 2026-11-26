@@ -17,6 +17,7 @@ const OK_KEY_CODE = 13;
 const UP_KEY_CODE = 38;
 const DOWN_KEY_CODE = 40;
 const INITIAL_FOCUS = 'thumb-1';
+const MAX_RECENT_SEARCHES = 5;
 
 interface AppProps {
 	config: SampleConfig;
@@ -31,6 +32,7 @@ export function App({ config, engine }: AppProps) {
 	const pendingFocus = useRef<string | null>(INITIAL_FOCUS);
 	const selectHandlers = useRef(new Map<string, () => void>());
 	const backHandler = useRef<(() => boolean) | null>(null);
+	const [recentSearches, setRecentSearches] = useState<string[]>([]);
 	const screen: Screen = stack[stack.length - 1] ?? { name: 'home' };
 
 	// 구독을 먼저 걸어야 첫 포커스 이동도 상태에 반영된다 (레이아웃 이펙트는 선언 순서대로 실행)
@@ -116,9 +118,13 @@ export function App({ config, engine }: AppProps) {
 		backHandler.current = handler;
 	}, []);
 
+	const addRecentSearch = useCallback((query: string) => {
+		setRecentSearches((list) => [query, ...list.filter((q) => q !== query)].slice(0, MAX_RECENT_SEARCHES));
+	}, []);
+
 	const contextValue = useMemo<AppContextValue>(
-		() => ({ config, layout, focusedId, registerSelect, focus, setBackHandler }),
-		[config, layout, focusedId, registerSelect, focus, setBackHandler]
+		() => ({ config, layout, focusedId, registerSelect, focus, setBackHandler, recentSearches, addRecentSearch }),
+		[config, layout, focusedId, registerSelect, focus, setBackHandler, recentSearches, addRecentSearch]
 	);
 
 	const openDetail = useCallback(

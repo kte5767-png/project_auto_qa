@@ -19,7 +19,7 @@ import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
 import type { RemoteKey } from '@auto-qa/core';
-import { nextResetStep, sameFingerprint, takeFingerprint } from '@auto-qa/focus';
+import { addedItems, nextResetStep, sameFingerprint, takeFingerprint } from '@auto-qa/focus';
 import type { Observation, ScreenFingerprint } from '@auto-qa/focus';
 import {
 	VERDICT_LABEL,
@@ -53,6 +53,7 @@ import {
 	loadKeyMaps,
 	record,
 	runEntry,
+	stateChangeCount,
 	target,
 	viewOptions
 } from './common';
@@ -190,6 +191,15 @@ class Runner {
 	/** 키 확인 결과 (화면|콜아웃|키) — 같은 확인은 한 번만 실행 */
 	readonly moves = new Map<string, ReturnType<typeof checkSpecMove>>();
 	readonly reset: ReturnType<typeof resetConfig>;
+	/**
+	 * 화면 표시(detect)별 깨끗한 상태의 요소 (D-043 ②): 앱을 연 뒤 다른 선택(OK·검색) 없이 그 화면에 들어왔을 때의 지문 요소.
+	 * 앞 단계가 남긴 상태(최근 검색어 등)로 요소가 새로 생겼는지 비교하는 기준
+	 */
+	readonly baselines = new Map<string, string[]>();
+	/** 깨끗하게 다시 열어도 요소가 달라지는 화면 표시(detect) (콘텐츠가 바뀌는 화면) — 상태 비교를 하지 않는다 */
+	readonly dynamic = new Set<string>();
+	/** 상태가 남아 앱을 다시 연 횟수 */
+	cleanRelaunches = 0;
 
 	constructor(readonly ctx: Ctx) {
 		this.reset = resetConfig(ctx.profile);
@@ -353,6 +363,8 @@ class Runner {
 		const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
 		if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
 		let session = this.newSession(screen);
+		// 진입 경로를 밟기 전까지 앱 상태를 바꾼 동작 수 (0이면 깨끗한 앱에서 들어감)
+		const changesBefore = stateChangeCount(this.app.driver);
 		const enter = async (): Promise<string | null> => {
 			const e = await runEntry(
 				session,
@@ -374,6 +386,19 @@ class Runner {
 			error = await enter();
 		}
 		if (error !== null) return error;
+		const drift = await this.stateDrift(screen, changesBefore);
+		if (drift !== null) {
+			// 앞 단계가 남긴 상태가 화면설계서의 전제와 다르게 만든다 → 깨끗한 앱에서 다시 (재시작은 이때만)
+			record(trail, { key: null, focus: `앱 상태가 다름 → 다시 열기 (${drift})`, stable: true }, '      ');
+			this.cleanRelaunches++;
+			const relaunched = await this.launch(trail);
+			if (relaunched !== null || this.app === null) return relaunched ?? '앱을 열지 못함';
+			session = this.newSession(screen);
+			error = await enter();
+			if (error !== null) return error;
+			const again = await this.stateDrift(screen, 0, drift);
+			if (again !== null) return again;
+		}
 		this.current = {
 			screen,
 			session,
@@ -382,6 +407,35 @@ class Runner {
 			freshAt: session.presses
 		};
 		return null;
+	}
+
+	/**
+	 * 앞 단계가 남긴 상태로 이 화면이 처음(깨끗한 상태)과 달라졌는가 (D-043 ②). 다르면 이유, 같거나 비교할 수 없으면 null.
+	 * - 깨끗한 앱에서 들어왔으면(changesBefore 0) 지금 요소를 기준으로 기억한다
+	 * - 기준이 없는데 앞 단계가 무언가 골랐으면 → 깨끗한 상태를 모르므로 다시 열어 기준을 만든다
+	 * - 기준보다 요소가 새로 생겼으면(최근 검색어 등) → 다시 연다
+	 * retried: 다시 연 뒤의 확인. 깨끗하게 열어도 달라지면 콘텐츠가 바뀌는 화면으로 보고 이후 비교하지 않는다
+	 */
+	private async stateDrift(
+		screen: string,
+		changesBefore: number,
+		retried: string | null = null
+	): Promise<string | null> {
+		// 같은 패널로 표시되는 화면(예: 4.1·4.2 검색 패널)은 기준을 함께 쓴다
+		const key = this.ctx.profile.screens[screen]?.detect ?? screen;
+		if (this.app === null || this.dynamic.has(key)) return null;
+		const now = (await takeFingerprint(this.app.driver, this.reset.fingerprint)).items;
+		const base = this.baselines.get(key);
+		if (changesBefore === 0) {
+			if (retried !== null && base !== undefined && addedItems(base, now).length > 0) this.dynamic.add(key);
+			this.baselines.set(key, now);
+			return null;
+		}
+		if (base === undefined) return '이 화면의 깨끗한 상태를 아직 모름';
+		const added = addedItems(base, now);
+		if (added.length === 0) return null;
+		const shown = added.slice(0, 3).join(', ');
+		return `처음 없던 요소 ${added.length}개: ${shown}${added.length > 3 ? ' …' : ''}`;
 	}
 
 	/** 요소 없이 포커스·로딩만 보는 세션 (앱 준비·되돌리기 대기용) */
@@ -1214,7 +1268,10 @@ async function main(): Promise<void> {
 		await runner.close();
 		await browser.close();
 	}
-	console.log(`앱을 연 횟수: ${runner.opens} · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}`);
+	console.log(
+		`앱을 연 횟수: ${runner.opens} (남은 상태 때문에 ${runner.cleanRelaunches}) · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}` +
+			(runner.dynamic.size > 0 ? ` · 콘텐츠가 바뀌어 상태 비교를 뺀 화면: ${[...runner.dynamic].join(', ')}` : '')
+	);
 
 	console.log(`\nTC 파일에 결과 쓰기 (${basename(tcPath)}):\n${await writeResults(tcPath, steps, values.overwrite)}`);
 	const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));

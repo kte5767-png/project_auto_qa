@@ -110,6 +110,20 @@ export const DEFAULT_LOADING_SELECTOR =
 
 const LOADING = '@loading';
 
+/**
+ * 앱 상태를 바꿀 수 있는 동작(OK 선택, 글자 입력 확인)을 드라이버별로 센다 (D-043 ②). 방향키·BACK은 상태를 남기지 않는다고 본다.
+ * 0이면 앱을 연 뒤 아직 아무것도 고르지 않은 깨끗한 상태
+ */
+const stateChanges = new WeakMap<Driver, number>();
+
+export function markStateChange(driver: Driver): void {
+	stateChanges.set(driver, (stateChanges.get(driver) ?? 0) + 1);
+}
+
+export function stateChangeCount(driver: Driver): number {
+	return stateChanges.get(driver) ?? 0;
+}
+
 export class Session {
 	private readonly targets: ObserveTarget[];
 	/** 화면설계서 콜아웃이 아닌 공통 요소(GNB 등) 이름 */
@@ -177,6 +191,7 @@ export class Session {
 	 */
 	async press(key: RemoteKey, show = true): Promise<{ obs: Observation; stable: boolean }> {
 		this.presses++;
+		if (key === 'OK') markStateChange(this.driver);
 		await this.driver.pressKey(key);
 		const s = await this.driver.waitForStable();
 		let obs = await this.observe();
@@ -295,6 +310,7 @@ async function typeEntry(
 	if ('error' in resolved) return `글자 입력 값: ${resolved.error}`;
 	const submit = step.submit ?? false;
 	let value: string;
+	if (submit) markStateChange(session.driver);
 	try {
 		value = (await session.driver.typeText(resolved.value, { replace: step.replace ?? true, submit })).value;
 	} catch (error) {

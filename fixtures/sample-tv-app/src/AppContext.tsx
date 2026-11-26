@@ -13,6 +13,9 @@ export interface AppContextValue {
 	focus: (id: string) => boolean;
 	/** Back 키를 화면이 먼저 받는다. 처리했으면 true (예: 검색 결과 → 검색 첫 화면) */
 	setBackHandler: (handler: (() => boolean) | null) => void;
+	/** 최근 검색어 (최신순, 화면설계서 4.3: 최대 5개). 검색 화면을 나가도 앱이 켜져 있는 동안 남는다 */
+	recentSearches: string[];
+	addRecentSearch: (query: string) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

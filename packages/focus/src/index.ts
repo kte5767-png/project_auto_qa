@@ -28,5 +28,6 @@ export {
 	matchHome,
 	nextResetStep,
 	sameFingerprint,
+	addedItems,
 	takeFingerprint
 } from './fingerprint';

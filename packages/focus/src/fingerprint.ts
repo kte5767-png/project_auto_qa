@@ -226,6 +226,22 @@ export interface ResetState {
 }
 
 /** 키를 누르기 전후 지문이 같은가 (BACK 반응 없음 = 최상위) */
+/**
+ * now에는 있고 base에는 없는 요소 이름 (같은 이름은 개수로 셈). 앞 단계가 남긴 상태(최근 검색어 등)로
+ * 화면에 새로 생긴 요소를 찾는 데 쓴다 (D-043 ②)
+ */
+export function addedItems(base: readonly string[], now: readonly string[]): string[] {
+	const left = new Map<string, number>();
+	for (const x of base) left.set(x, (left.get(x) ?? 0) + 1);
+	const added: string[] = [];
+	for (const x of now) {
+		const n = left.get(x) ?? 0;
+		if (n > 0) left.set(x, n - 1);
+		else added.push(x);
+	}
+	return added;
+}
+
 export function sameFingerprint(a: ScreenFingerprint, b: ScreenFingerprint): boolean {
 	return (
 		a.focus === b.focus &&
