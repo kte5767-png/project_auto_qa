@@ -29,6 +29,7 @@ import {
 	result,
 	runEntry,
 	target,
+	trailLabel,
 	viewOptions
 } from './common';
 import type { Trail } from './common';
@@ -119,10 +120,7 @@ function report(
 		''
 	);
 	lines.push('## 진입', '');
-	for (const t of entryTrail)
-		lines.push(
-			`- ${t.key === null ? '(대기)' : KEY_LABEL[t.key]} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`
-		);
+	for (const t of entryTrail) lines.push(`- ${trailLabel(t)} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`);
 	if (entryError !== null) lines.push('', `**진입 실패: ${entryError}**`);
 	lines.push('');
 	if (steps.length === 0) return `${lines.join('\n')}\n`;
@@ -149,9 +147,7 @@ function report(
 		lines.push(`## ${s.step.id} ${s.step.title} — ${VERDICT_LABEL[s.verdict.verdict]}`, '');
 		if (s.step.expected !== undefined) lines.push(`TC 기대 결과: ${s.step.expected}`, '');
 		for (const t of s.trail)
-			lines.push(
-				`- ${t.key === null ? '(시작)' : KEY_LABEL[t.key]} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`
-			);
+			lines.push(`- ${trailLabel(t, '(시작)')} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`);
 		lines.push('', '| 조건 | 방법 | 결과 | 설명 |', '|---|---|---|---|');
 		for (const r of s.results) {
 			lines.push(
@@ -194,7 +190,7 @@ async function main(): Promise<void> {
 	let entryError: string | null;
 	try {
 		console.log(`앱 열기: ${url}`);
-		entryError = await runEntry(session, scenario.entry, entryTrail);
+		entryError = await runEntry(session, scenario.entry, entryTrail, scenario.testData);
 		await writeFile(join(out, 'entry.png'), await driver.screenshot());
 		if (entryError !== null) console.log(`진입 실패: ${entryError}`);
 		else {

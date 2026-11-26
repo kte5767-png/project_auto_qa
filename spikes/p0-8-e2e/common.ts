@@ -5,13 +5,21 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fitWindowScale, probeScreen } from '@auto-qa/browser';
+import { TextInputError } from '@auto-qa/core';
 import type { Driver, RemoteKey } from '@auto-qa/core';
 import { analyzeExport, parseExport } from '@auto-qa/figma';
 import type { NormalizedFrame } from '@auto-qa/figma';
 import { observeTargets } from '@auto-qa/focus';
 import type { Observation, ObserveTarget, ObservedTarget } from '@auto-qa/focus';
 import type { Check, CheckKind, CheckResult, Verdict } from '@auto-qa/judge';
-import { buildKeyMap, expectAfterKey, expectedItemIndex, matchByName, navScreenFromSpec } from '@auto-qa/planner';
+import {
+	buildKeyMap,
+	expectAfterKey,
+	expectedItemIndex,
+	matchByName,
+	navScreenFromSpec,
+	resolveTextValue
+} from '@auto-qa/planner';
 import type { KeyAction, KeyMapOptions } from '@auto-qa/planner';
 import { extractSpecScreen, mergeSpecScreens } from '@auto-qa/spec';
 import type { SpecKey, SpecScreen } from '@auto-qa/spec';
@@ -82,6 +90,18 @@ export interface Trail {
 	key: RemoteKey | null;
 	focus: string;
 	stable: boolean;
+	/** 키가 아닌 동작 (예: 글자 입력). 있으면 키 대신 이것을 보여 준다 */
+	action?: string;
+}
+
+/** 로그·리포트에 쓰는 한 칸: 키 이름, 동작, 또는 대기 */
+export function trailLabel(t: Trail, idle = '(대기)'): string {
+	return t.action ?? (t.key === null ? idle : KEY_LABEL[t.key]);
+}
+
+/** 넣은 글자를 로그에 보이는 길이로 */
+export function shownText(text: string, max = 24): string {
+	return text.length <= max ? `"${text}"` : `"${text.slice(0, max)}…" (${text.length}자)`;
 }
 
 /** 로딩 표시(스피너·스켈레톤 등). 보이는 동안은 화면이 준비되지 않은 것으로 본다. 프로필 `loading`으로 바꾼다 */
@@ -92,6 +112,8 @@ const LOADING = '@loading';
 
 export class Session {
 	private readonly targets: ObserveTarget[];
+	/** 화면설계서 콜아웃이 아닌 공통 요소(GNB 등) 이름 */
+	readonly common: ReadonlySet<string>;
 	/** 요소별 마지막 포커스 항목 (화면설계서 "이동한 이력이 있을 경우") */
 	readonly remembered = new Map<string, number>();
 
@@ -105,6 +127,11 @@ export class Session {
 		loadingSelector: string | null = DEFAULT_LOADING_SELECTOR
 	) {
 		this.targets = observeTargetsOf(elements);
+		this.common = new Set(
+			Object.entries(elements)
+				.filter(([, e]) => e.callout === undefined)
+				.map(([name]) => name)
+		);
 		if (loadingSelector !== null && loadingSelector !== '') {
 			this.targets.push({ name: LOADING, selector: loadingSelector, textIncludes: null, items: null });
 		}
@@ -197,14 +224,20 @@ export function focusText(obs: Observation): string {
 
 export function record(trail: Trail[], t: Trail, indent = '  진입 '): void {
 	trail.push(t);
-	console.log(
-		`${indent}${t.key === null ? '(대기)' : KEY_LABEL[t.key]} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`
-	);
+	console.log(`${indent}${trailLabel(t)} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`);
 }
 
-export async function runEntry(session: Session, entry: readonly EntryStep[], trail: Trail[]): Promise<string | null> {
+export async function runEntry(
+	session: Session,
+	entry: readonly EntryStep[],
+	trail: Trail[],
+	testData: Readonly<Record<string, string>> = {}
+): Promise<string | null> {
 	for (const step of entry) {
-		if ('waitFocus' in step) {
+		if ('type' in step) {
+			const error = await typeEntry(session, step, trail, testData);
+			if (error !== null) return error;
+		} else if ('waitFocus' in step) {
 			const obs = await session.until((o) => o.focus !== null, step.timeoutMs ?? session.timing.readyTimeoutMs);
 			if (obs === null) return '앱에 포커스가 생기지 않음 (앱이 떴는지, 로딩·팝업 확인)';
 			record(trail, { key: null, focus: focusText(obs), stable: true });
@@ -225,8 +258,10 @@ export async function runEntry(session: Session, entry: readonly EntryStep[], tr
 			const reached = (o: Observation): boolean => target(o, goal)?.hasFocus === true;
 			const start = await session.observe();
 			if (reached(start)) continue;
-			// 시작할 때 포커스가 있던 요소(예: GNB). 키를 눌러 그 밖으로 나가면 헛돌지 않고 바로 멈춘다
-			const startIn = start.targets.filter((t) => t.hasFocus && !t.name.startsWith('@')).map((t) => t.name);
+			// 시작할 때 포커스가 있던 공통 요소(예: GNB). 키를 눌러 그 밖으로 나가면 헛돌지 않고 바로 멈춘다.
+			// 화면 안 콜아웃에서 시작했으면 다른 콜아웃을 지나 목표로 가는 것이 정상이라 멈추지 않는다
+			// (예: 최근 검색어가 있으면 검색창 ▼가 최근 검색어를 거쳐 추천 검색어로 간다)
+			const startIn = start.targets.filter((t) => t.hasFocus && session.common.has(t.name)).map((t) => t.name);
 			const max = step.max ?? 5;
 			let done = false;
 			for (const [key, times] of [
@@ -246,6 +281,36 @@ export async function runEntry(session: Session, entry: readonly EntryStep[], tr
 			if (!done) return `${KEY_LABEL[step.press]}로 "${goal}"에 가지 못함`;
 		}
 	}
+	return null;
+}
+
+/** 진입 경로의 글자 입력 (D-043 ①). 확인(submit)을 보내면 화면이 바뀌므로 자리 잡을 때까지 기다린다 */
+async function typeEntry(
+	session: Session,
+	step: Extract<EntryStep, { type: string }>,
+	trail: Trail[],
+	testData: Readonly<Record<string, string>>
+): Promise<string | null> {
+	const resolved = resolveTextValue(step.type, { seed: step.seed ?? 'entry', data: testData });
+	if ('error' in resolved) return `글자 입력 값: ${resolved.error}`;
+	const submit = step.submit ?? false;
+	let value: string;
+	try {
+		value = (await session.driver.typeText(resolved.value, { replace: step.replace ?? true, submit })).value;
+	} catch (error) {
+		if (error instanceof TextInputError) return error.message;
+		throw error;
+	}
+	const settled = submit
+		? await session.settle(session.timing.readyTimeoutMs)
+		: { obs: await session.observe(), settled: (await session.driver.waitForStable()).stable };
+	const cut = value === resolved.value ? '' : ` → 입력란 ${shownText(value)}`;
+	record(trail, {
+		key: null,
+		action: `글자 입력 ${shownText(resolved.value)}${cut}${submit ? ' + 확인' : ''}`,
+		focus: focusText(settled.obs),
+		stable: settled.settled
+	});
 	return null;
 }
 

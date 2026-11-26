@@ -1,5 +1,24 @@
-import { DEFAULT_STABLE_OPTIONS, UnsupportedKeyError, WEBOS_KEY_MAP } from '@auto-qa/core';
-import type { Driver, KeyMap, RemoteKey, ScreenshotOptions, StableOptions, StableResult } from '@auto-qa/core';
+import {
+	DEFAULT_STABLE_OPTIONS,
+	DEFAULT_TYPE_TEXT_OPTIONS,
+	TextInputError,
+	UnsupportedKeyError,
+	WEBOS_KEY_MAP,
+	textChangeScript,
+	textFieldScript,
+	textNotApplied
+} from '@auto-qa/core';
+import type {
+	Driver,
+	KeyMap,
+	RemoteKey,
+	ScreenshotOptions,
+	StableOptions,
+	StableResult,
+	TextFieldState,
+	TypeTextOptions,
+	TypeTextResult
+} from '@auto-qa/core';
 import type { Browser, CDPSession, Page } from 'playwright-core';
 import { pressRemoteKey, waitForStable } from './session';
 
@@ -54,6 +73,31 @@ export class BrowserDriver implements Driver {
 			);
 		}
 		await pressRemoteKey(this.cdp, def);
+	}
+
+	/**
+	 * 글자 입력: 플랫폼 키보드 대신 입력 이벤트(CDP `Input.insertText`)로 넣는다 — 키 이벤트를 만들지 않으므로
+	 * 앱의 키 처리(공간 탐색 등)를 건드리지 않는다. 확인은 리모컨 OK(Enter)로 보낸다.
+	 */
+	async typeText(text: string, options: Partial<TypeTextOptions> = {}): Promise<TypeTextResult> {
+		const o = { ...DEFAULT_TYPE_TEXT_OPTIONS, ...options };
+		const before = await this.page.evaluate<TextFieldState>(textFieldScript('read'));
+		if (!before.editable) {
+			throw new TextInputError(
+				this.kind,
+				before.tag === '' ? '포커스된 입력란이 없음' : `포커스된 요소(${before.tag})가 글자를 받지 않음`
+			);
+		}
+		if (o.replace) await this.page.evaluate(textFieldScript(text === '' ? 'clear' : 'select'));
+		if (text !== '') await this.page.keyboard.insertText(text);
+		const after = await this.page.evaluate<TextFieldState & { changed: boolean }>(
+			textChangeScript(before.value, o.timeoutMs)
+		);
+		if (textNotApplied(before.value, after, text, o.replace)) {
+			throw new TextInputError(this.kind, '넣은 글자가 입력란에 반영되지 않음');
+		}
+		if (o.submit) await this.pressKey('OK');
+		return { value: after.value };
 	}
 
 	evaluate<T>(expression: string): Promise<T> {

@@ -7,3 +7,5 @@ export type { Driver, ScreenshotOptions, ScriptRunner, StableOptions, StableResu
 export { DEFAULT_STABLE_OPTIONS, UnsupportedKeyError } from './driver';
 export { PAGE_SCRIPT_ECMA_VERSION, pageExpression } from './pageScript';
 export { stableWaitScript } from './stable';
+export type { TextFieldMode, TextFieldState, TypeTextOptions, TypeTextResult } from './text';
+export { DEFAULT_TYPE_TEXT_OPTIONS, TextInputError, textChangeScript, textFieldScript, textNotApplied } from './text';

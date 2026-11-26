@@ -330,6 +330,20 @@ body {
 	border-color: #fff;
 }
 
+/* 편집 중 (TV에서는 VKB가 열린 상태) */
+.search-field.editing {
+	border-color: #4da3ff;
+}
+
+.search-message {
+	position: absolute;
+	left: 210px;
+	margin: 0;
+	font-size: 30px;
+	line-height: 40px;
+	color: var(--sub-text);
+}
+
 .search-icon {
 	font-size: 34px;
 	color: #bbb;

@@ -354,7 +354,12 @@ class Runner {
 		if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
 		let session = this.newSession(screen);
 		const enter = async (): Promise<string | null> => {
-			const e = await runEntry(session, entryPath(ctx.profile, ctx.registry, screen), trail);
+			const e = await runEntry(
+				session,
+				entryPath(ctx.profile, ctx.registry, screen),
+				trail,
+				ctx.profile.testData
+			);
 			if (e !== null) return e;
 			const shown = await session.until((o) => this.shown(o, screen), ctx.timing.readyTimeoutMs);
 			return shown === null ? `${screen} 화면 표시(detect)가 보이지 않음` : null;

@@ -30,6 +30,7 @@ export function App({ config, engine }: AppProps) {
 	const [homeView, setHomeView] = useState<HomeView>(INITIAL_HOME_VIEW);
 	const pendingFocus = useRef<string | null>(INITIAL_FOCUS);
 	const selectHandlers = useRef(new Map<string, () => void>());
+	const backHandler = useRef<(() => boolean) | null>(null);
 	const screen: Screen = stack[stack.length - 1] ?? { name: 'home' };
 
 	// 구독을 먼저 걸어야 첫 포커스 이동도 상태에 반영된다 (레이아웃 이펙트는 선언 순서대로 실행)
@@ -57,6 +58,7 @@ export function App({ config, engine }: AppProps) {
 	const back = useCallback(() => {
 		if (screen.name === 'home') return;
 		if (screen.name === 'search' && config.defects.has('D11')) return;
+		if (backHandler.current?.() === true) return;
 		let returnFocus: string;
 		if (screen.name === 'detail') {
 			returnFocus = config.defects.has('D10') ? 'gnb-home' : screen.originId;
@@ -109,9 +111,14 @@ export function App({ config, engine }: AppProps) {
 		};
 	}, []);
 
+	const focus = useCallback((id: string) => engine.focus(id), [engine]);
+	const setBackHandler = useCallback((handler: (() => boolean) | null) => {
+		backHandler.current = handler;
+	}, []);
+
 	const contextValue = useMemo<AppContextValue>(
-		() => ({ config, layout, focusedId, registerSelect }),
-		[config, layout, focusedId, registerSelect]
+		() => ({ config, layout, focusedId, registerSelect, focus, setBackHandler }),
+		[config, layout, focusedId, registerSelect, focus, setBackHandler]
 	);
 
 	const openDetail = useCallback(

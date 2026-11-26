@@ -9,6 +9,10 @@ export interface AppContextValue {
 	layout: Layout;
 	focusedId: string | null;
 	registerSelect: (id: string, handler: () => void) => () => void;
+	/** 포커스를 옮긴다 (화면 안 상태가 바뀔 때, 예: 검색 결과) */
+	focus: (id: string) => boolean;
+	/** Back 키를 화면이 먼저 받는다. 처리했으면 true (예: 검색 결과 → 검색 첫 화면) */
+	setBackHandler: (handler: (() => boolean) | null) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

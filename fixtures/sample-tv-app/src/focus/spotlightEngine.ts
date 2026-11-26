@@ -9,7 +9,9 @@ import type { FocusEngine, FocusListener } from './engine';
 export function createSpotlightEngine(root: HTMLElement): FocusEngine {
 	const listeners = new Set<FocusListener>();
 
-	const idOf = (el: Element | null): string | null => (el instanceof HTMLElement ? el.getAttribute(NAV_ATTR) : null);
+	// 포커스 가능한 요소 안의 입력란(검색 편집 중)에 DOM 포커스가 있어도 그 요소로 본다
+	const idOf = (el: Element | null): string | null =>
+		el instanceof HTMLElement ? (el.closest(`[${NAV_ATTR}]`)?.getAttribute(NAV_ATTR) ?? null) : null;
 
 	const notify = (id: string | null): void => {
 		for (const listener of listeners) listener(id);

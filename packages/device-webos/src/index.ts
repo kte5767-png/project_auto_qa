@@ -12,7 +12,7 @@ export {
 	parseRunningApps
 } from './ares';
 export type { SsapManifest } from './ssap';
-export { DEFAULT_SSAP_MANIFEST, PointerSocket, SsapClient, SsapError, buttonFrame } from './ssap';
+export { DEFAULT_SSAP_MANIFEST, IME_URI, PointerSocket, SsapClient, SsapError, buttonFrame } from './ssap';
 export type { InspectorTarget } from './inspector';
 export {
 	CdpConnection,

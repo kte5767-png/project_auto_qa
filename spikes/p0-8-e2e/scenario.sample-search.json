@@ -1,0 +1,106 @@
+{
+	"format": "auto-qa/e2e-scenario",
+	"version": 1,
+	"name": "샘플 TV 앱 — 검색어 입력 (결과 없음 / 결과 있음)",
+	"url": "http://localhost:5173/",
+	"focusSelector": null,
+	"elements": {
+		"GNB": {
+			"selector": ".gnb",
+			"names": ["GNB", "메뉴"]
+		},
+		"GNB 검색": {
+			"selector": ".gnb-item",
+			"textIncludes": "Search"
+		},
+		"뒤로 버튼": {
+			"selector": ".search-back"
+		},
+		"검색창": {
+			"selector": ".search-field"
+		},
+		"추천 검색어 제목": {
+			"selector": ".search h2.search-section-title:first-of-type"
+		},
+		"추천 검색어": {
+			"selector": ".search-chip"
+		},
+		"Travel Now": {
+			"selector": ".search-card"
+		},
+		"결과 없음 문구": {
+			"selector": ".search-message"
+		},
+		"결과 없음 추천 키워드": {
+			"selector": ".search-chip"
+		},
+		"검색 결과": {
+			"selector": ".search-card"
+		}
+	},
+	"entry": [
+		{
+			"waitFocus": true
+		},
+		{
+			"press": "LEFT",
+			"until": "GNB 검색",
+			"max": 3,
+			"else": "DOWN"
+		},
+		{
+			"press": "OK"
+		},
+		{
+			"waitFor": "검색창"
+		},
+		{
+			"press": "OK"
+		},
+		{
+			"type": "@no-result",
+			"submit": true,
+			"seed": "4.6"
+		}
+	],
+	"steps": [
+		{
+			"id": "1",
+			"title": "결과 없는 검색어 → 결과 없음 문구 + 추천 키워드 최대 3개, 포커스는 검색창",
+			"keys": [],
+			"expected": "검색 결과가 없을 경우 Search field에 포커스, 가이드 문구, 추천 키워드 최대 3개",
+			"checks": [
+				{
+					"focus": "검색창",
+					"clause": "포커스: 검색창"
+				},
+				{
+					"present": "결과 없음 문구",
+					"clause": "가이드 문구 노출"
+				},
+				{
+					"count": "결과 없음 추천 키워드",
+					"max": 3,
+					"clause": "추천 키워드 최대 3개"
+				}
+			]
+		},
+		{
+			"id": "2",
+			"title": "추천 키워드 선택 → 검색 결과",
+			"keys": ["DOWN", "OK"],
+			"expected": "선택한 키워드로 검색 결과 제공",
+			"checks": [
+				{
+					"present": "검색 결과",
+					"clause": "검색 결과 카드 노출"
+				},
+				{
+					"focus": "검색 결과",
+					"item": 0,
+					"clause": "포커스: 첫 결과"
+				}
+			]
+		}
+	]
+}

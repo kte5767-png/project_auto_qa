@@ -25,6 +25,7 @@ export const DEFAULT_SSAP_MANIFEST: SsapManifest = {
 		'LAUNCH',
 		'CONTROL_INPUT_JOYSTICK',
 		'CONTROL_MOUSE_AND_KEYBOARD',
+		'CONTROL_INPUT_TEXT',
 		'READ_INSTALLED_APPS',
 		'READ_RUNNING_APPS',
 		'READ_INPUT_DEVICE_LIST',
@@ -34,6 +35,16 @@ export const DEFAULT_SSAP_MANIFEST: SsapManifest = {
 };
 
 export const POINTER_SOCKET_URI = 'ssap://com.webos.service.networkinput/getPointerInputSocket';
+
+/**
+ * 플랫폼 키보드(IME) 서비스 (D-043 ①). 키보드가 열린 입력란에 글자를 넣고, 지우고, 확인(Enter)을 보낸다.
+ * 권한 `CONTROL_INPUT_TEXT`가 필요하다 — 이 권한 없이 페어링한 키는 다시 페어링해야 한다. 실기기 확인은 P0-6
+ */
+export const IME_URI = {
+	insertText: 'ssap://com.webos.service.ime/insertText',
+	deleteCharacters: 'ssap://com.webos.service.ime/deleteCharacters',
+	sendEnterKey: 'ssap://com.webos.service.ime/sendEnterKey'
+} as const;
 
 export class SsapError extends Error {
 	override name = 'SsapError';

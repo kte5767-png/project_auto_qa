@@ -34,7 +34,7 @@ pnpm spike:e2e spikes/p0-8-e2e/scenario.local.json --spec spikes/p0-8-e2e/spec -
 실제 앱용 시나리오는 회사 앱 정보(선택자·화면설계서 번호)가 들어 있으므로 `*.local.json`으로 두고 커밋하지 않습니다.
 
 - `elements`: 사람이 정한 콜아웃 ↔ 앱 요소 대응 (설계 7.11 ②). `selector`(CSS, `:has()` 금지), `items`(목록 항목), `textIncludes`, `callout`(`"4.2#1"` = 4.2 화면 ①), `names`(화면설계서 문장에서 부르는 이름, 예: `GNB`).
-- `entry`: 시작 화면까지 가는 길. `waitFocus`(앱에 포커스가 생길 때까지), `waitFor`(요소가 보일 때까지), `press` + `until`(그 요소에 갈 때까지 같은 키, 안 되면 `else` 키).
+- `entry`: 시작 화면까지 가는 길. `waitFocus`(앱에 포커스가 생길 때까지), `waitFor`(요소가 보일 때까지), `press` + `until`(그 요소에 갈 때까지 같은 키, 안 되면 `else` 키), `type`(포커스된 입력란에 글자 입력, D-043 ①: 글자 그대로 / `@no-result` 결과 없는 글자 / `@over-limit:255` 상한 + 1자 / `@data:이름` 테스트 데이터, `submit: true`면 확인(Enter)까지). 입력란은 먼저 OK로 편집 상태(TV에서는 키보드 열림)로 만든다. 예: `scenario.sample-search.json`(샘플 앱 검색어 입력 → 결과 없음 → 추천 키워드 → 결과).
 - `steps[].checks`
   - `{ "focus": "검색창" }` / `{ "focus": "추천 검색어", "item": 0 }`: 포커스 위치
   - `{ "focus": "@spec" }`: 이 단계의 키마다 화면설계서 이동 지도와 비교
