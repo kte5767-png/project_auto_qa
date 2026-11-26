@@ -20,9 +20,33 @@ export type { AutomationContext, AutomationRule } from './labels';
 export { DEFAULT_AUTOMATION_RULES, classifyStep } from './labels';
 export type { SheetSummary, Summary } from './summary';
 export { summarize } from './summary';
-export type { ResultWrite, ResultWriteReport } from './workbook';
-export { readWorkbook, writeResultCopy } from './workbook';
+export type { ResultWrite, ResultWriteOptions, ResultWriteReport } from './workbook';
+export {
+	DEFAULT_HIGHLIGHT_COLOR,
+	backupPath,
+	readListValidations,
+	readWorkbook,
+	writeResultCopy,
+	writeResultInPlace
+} from './workbook';
+export type {
+	ListValidation,
+	ResultCellOptions,
+	ResultCellPlan,
+	ResultCellWrite,
+	ResultVocabulary,
+	ResultWords,
+	StepOutcome,
+	StepResult
+} from './resultCells';
+export {
+	DEFAULT_RESULT_CELL_OPTIONS,
+	DEFAULT_RESULT_WORDS,
+	inRange,
+	listValidations,
+	listValuesAt,
+	resultCellWrites,
+	resultVocabulary
+} from './resultCells';
 export type { PatchStatus } from './xlsxPatch';
-export { addMergeCells, cellStyle, setCellText, sheetPartPaths, workbookPartPath } from './xlsxPatch';
-export type { EndColumnPlan, EndColumns, StepValues } from './endColumns';
-export { END_COLUMN_HEADERS, endColumnWrites, endColumns } from './endColumns';
+export { addFillStyle, addMergeCells, cellStyle, setCellText, sheetPartPaths, workbookPartPath } from './xlsxPatch';

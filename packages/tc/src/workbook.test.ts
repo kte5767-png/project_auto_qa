@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import ExcelJS from 'exceljs';
@@ -8,8 +8,8 @@ import { cellText } from './grid';
 import { normalize } from './normalize';
 import { suggestProfile } from './suggest';
 import { ROW_PER_STEP_HEADER, defined } from './testing';
-import { endColumnWrites, endColumns } from './endColumns';
-import { readWorkbook, writeResultCopy } from './workbook';
+import { resultCellWrites, resultVocabulary, listValuesAt } from './resultCells';
+import { backupPath, readListValidations, readWorkbook, writeResultCopy, writeResultInPlace } from './workbook';
 
 let dir = '';
 let source = '';
@@ -105,42 +105,92 @@ describe('writeResultCopy', () => {
 		expect(cellText(defined((await readWorkbook(output)).sheets[0]), 3, 8)).toBe('F');
 	});
 
-	it('표 맨 뒤에 자동 판정 열을 쓰고, 여러 행 단계는 같은 범위로 병합하고, 결과 칸 스타일을 따른다 (D-034)', async () => {
-		const grid = await readWorkbook(source);
-		const profile = suggestProfile(grid);
-		const sheetProfile = defined(profile.sheets.find((p) => p.sheet === 'Home'));
-		const home = defined(grid.sheets[0]);
-		const target = endColumns(home, sheetProfile.headerRow);
-		expect(target.columns).toEqual([10, 11, 12]); // 헤더 9열(A~I) 다음
-		const steps = normalize(grid, profile).cases.flatMap((c) => c.steps);
-		const plan = endColumnWrites(
-			target,
-			steps.map((s) => ({
-				row: s.row,
-				rowSpan: s.rowSpan,
-				values: ['Pass', `설명 ${s.row}`, '코드 1'],
-				styleFrom: s.resultCell?.address ?? null
-			})),
-			{ headerStyleFrom: 'H1' }
-		);
-		expect(plan.merges.map((m) => m.ref)).toEqual(['J4:J5', 'K4:K5', 'L4:L5']);
-		const output = join(dir, 'end.xlsx');
-		const report = await writeResultCopy(source, output, plan.writes, { merges: plan.merges });
-		expect(report.written).toBe(12);
-		const after = defined((await readWorkbook(output)).sheets[0]);
-		expect([cellText(after, 1, 10), cellText(after, 1, 11), cellText(after, 1, 12)]).toEqual([
-			'자동 판정',
-			'판정 설명',
-			'판정 근거'
-		]);
-		expect(cellText(after, 4, 11)).toBe('설명 4');
-		expect(after.merges).toContainEqual({ top: 4, left: 10, bottom: 5, right: 10 });
-		expect(cellText(after, 3, 8)).toBe('P'); // 원본 P/F 칸은 그대로
-		// 같은 사본을 다시 검수하면 같은 열을 다시 쓴다
-		expect(endColumns(after, sheetProfile.headerRow)).toMatchObject({ columns: [10, 11, 12], reused: true });
-	});
-
 	it('원본 경로에는 쓰지 않는다', async () => {
 		await expect(writeResultCopy(source, source, [])).rejects.toThrow('원본 파일');
+	});
+});
+
+describe('writeResultInPlace (D-040)', () => {
+	let formSource = '';
+
+	beforeAll(async () => {
+		formSource = join(dir, 'form.xlsx');
+		const wb = new ExcelJS.Workbook();
+		const ws = wb.addWorksheet('Search');
+		ws.addRow([...ROW_PER_STEP_HEADER, 'Issue Detail', 'Issue Status']);
+		ws.addRow(['scenario_v1.0_4.2', 'Search', '추천 검색어', 1, '', '(2) 추천 검색어', '최대 5개', '', '', '', '']);
+		ws.addRow(['', '', '', 2, '', '[▼] 입력', '주간 인기 도시 포커스', '', '', '', '']);
+		ws.addRow(['', '', '', 3, '', '[OK] 입력', '검색 결과', '', '', '', '']);
+		ws.addRow(['', '', '', 4, '', '[◀] 입력', 'GNB 확장', 'Passed', '', '', '']);
+		for (let r = 2; r <= 5; r++) {
+			ws.getCell(`H${r}`).dataValidation = {
+				type: 'list',
+				allowBlank: true,
+				formulae: ['"Passed,Failed,Reopened,Skipped,Not Testable"']
+			};
+			ws.getCell(`J${r}`).border = { top: { style: 'thin' }, bottom: { style: 'thin' } };
+		}
+		await wb.xlsx.writeFile(formSource);
+	});
+
+	it('그 파일의 드롭다운 값으로 P/F 열에, 이유는 Issue Detail에 쓰고, 열을 늘리지 않으며, 먼저 백업을 남긴다', async () => {
+		const path = join(dir, 'form-run.xlsx');
+		await copyFile(formSource, path);
+		const before = await readFile(path);
+		const grid = await readWorkbook(path);
+		const profile = suggestProfile(grid);
+		const sp = defined(profile.sheets.find((p) => p.sheet === 'Search'));
+		expect(sp.columns).toMatchObject({ result: 'H', issue: 'J' });
+		const steps = normalize(grid, profile).cases.flatMap((c) => c.steps);
+		const validations = defined((await readListValidations(path)).get('Search'));
+		const vocab = defined(resultVocabulary(listValuesAt(validations, defined(steps[0]?.resultCell).address)));
+		expect(vocab).toMatchObject({ pass: 'Passed', fail: 'Failed' });
+
+		const outcomes = ['fail', 'needs-review', 'pass', 'pass'] as const;
+		const plan = resultCellWrites(
+			steps.map((st, i) => ({
+				resultCell: defined(st.resultCell),
+				outcome: outcomes[i] ?? 'pass',
+				reason: i === 0 ? '추천 검색어 6개 (최대 5개)' : i === 1 ? '▼ 후 포커스가 다름' : '',
+				checked: 1
+			})),
+			vocab,
+			sp.columns.issue ?? null
+		);
+		const now = new Date('2026-11-27T03:00:00Z');
+		const report = await writeResultInPlace(path, plan.writes, { now });
+		expect(report.backup).toBe(backupPath(path, now));
+		expect(defined(report.backup)).toMatch(/form-run\.before-auto-qa-\d{8}-\d{6}\.xlsx$/);
+		expect(await readFile(defined(report.backup))).toEqual(before);
+		expect(report.skipped.map((c) => c.address)).toEqual(['H5']); // 사람이 쓴 값은 그대로
+		expect(report.written).toBe(5);
+
+		const after = defined((await readWorkbook(path)).sheets[0]);
+		const col = (c: number) => [2, 3, 4, 5].map((r) => cellText(after, r, c));
+		expect(col(8)).toEqual(['Failed', 'Passed', 'Passed', 'Passed']);
+		expect(col(10)).toEqual(['추천 검색어 6개 (최대 5개)', '[확인 필요] ▼ 후 포커스가 다름', null, null]);
+		expect(cellText(after, 1, 12)).toBeNull(); // 열 추가 없음
+
+		// 확인 필요 칸은 원래 테두리를 유지한 채 칠한 서식
+		const zip = await JSZip.loadAsync(await readFile(path));
+		const sheetXml = await defined(zip.file('xl/worksheets/sheet1.xml')).async('string');
+		const styleOf = (ref: string) =>
+			/\bs="(\d+)"/.exec(new RegExp(`<c r="${ref}"[^>]*>`).exec(sheetXml)?.[0] ?? '')?.[1];
+		expect(styleOf('J3')).not.toBe(styleOf('J2'));
+		const stylesXml = await defined(zip.file('xl/styles.xml')).async('string');
+		expect(stylesXml).toContain('FFFFF2CC');
+		// 드롭다운은 그대로
+		expect(sheetXml).toContain('Passed,Failed,Reopened,Skipped,Not Testable');
+	});
+
+	it('바뀌는 칸이 없으면 파일·백업을 만들지 않는다 (같은 파일 다시 실행)', async () => {
+		const path = join(dir, 'form-again.xlsx');
+		await copyFile(formSource, path);
+		const grid = await readWorkbook(path);
+		const step = defined(normalize(grid, suggestProfile(grid)).cases[0]?.steps[3]);
+		const files = await readdir(dir);
+		const report = await writeResultInPlace(path, [{ cell: defined(step.resultCell), value: 'Failed' }]);
+		expect(report).toMatchObject({ written: 0, backup: null });
+		expect(await readdir(dir)).toEqual(files);
 	});
 });

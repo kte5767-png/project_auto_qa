@@ -17,6 +17,10 @@ const ROLE_PATTERNS: [ColumnRole, RegExp][] = [
 	['action', /^(action|test ?procedure|procedure|test ?steps?|절차|수행 ?절차|테스트 ?절차|조작)/i],
 	['expected', /^(expected( ?results?)?|기대 ?결과|예상 ?결과)/i],
 	['result', /^(p ?\/ ?f|pass ?\/ ?fail|result|결과|판정|테스트 ?결과)$/i],
+	[
+		'issue',
+		/^(issue ?(details?|descriptions?|contents?)|이슈 ?(내용|상세|설명)|결함 ?(내용|설명)|fail(ure)? ?reasons?|실패 ?(사유|원인))$/i
+	],
 	['note', /^(비고|note|notes|remarks?|comments?)$/i],
 	['severity', /^(severity|심각도|중요도|priority|우선 ?순위)$/i]
 ];

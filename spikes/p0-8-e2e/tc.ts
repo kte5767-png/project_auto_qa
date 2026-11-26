@@ -1,10 +1,10 @@
 /**
  * P0-8 TC 실행 스파이크: TC 엑셀의 자동 대상 단계를 앱에서 리모컨 키로 실행하고,
- * 기대 결과를 조건으로 나눠(D-037) 코드로 판정한 뒤, 사본 엑셀 맨 뒤 열에 기록한다(D-034).
- * 사람이 그 사본의 원래 P/F 열에 결과를 적어 주면(--score) 자동 판정과의 일치율을 잰다.
+ * 기대 결과를 조건으로 나눠(D-037) 코드로 판정한 뒤, 그 TC 파일에 양식 그대로 P/F와 이유를 쓴다(D-040, 쓰기 전 백업).
+ * 사람이 P/F를 적은 다른 파일(QA 결과 보고서 등, --truth)과 비교해 일치율을 잰다.
  *
- *   pnpm spike:tc-run <TC.xlsx> --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec
- *   pnpm spike:tc-run --score out/<시각>/result.json --truth <사람이 P/F 적은 사본.xlsx>
+ *   pnpm spike:tc-run <TC.xlsx> --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec [--truth <QA 결과.xlsx>]
+ *   pnpm spike:tc-run --score out/<시각>/result.json --truth <QA 결과.xlsx>
  *
  * 한 단계 = 화면설계서 콜아웃 하나의 사양(표시 내용·개수·키 동작·선택 시).
  *   1. 그 화면까지 간다 (앱 프로필의 진입 경로). 같은 화면의 단계들은 앱을 한 번만 연다 (D-038)
@@ -31,8 +31,17 @@ import {
 import type { Check, CheckResult, Clause, StepVerdict, Verdict } from '@auto-qa/judge';
 import { DEFAULT_KEYMAP_OPTIONS, DEFAULT_ROUTE_OPTIONS, nameScore, planRoute } from '@auto-qa/planner';
 import type { KeyAction, KeyMapOptions } from '@auto-qa/planner';
-import { endColumnWrites, endColumns, normalize, readWorkbook, suggestProfile, writeResultCopy } from '@auto-qa/tc';
-import type { ResultWrite, StepValues, TcCase, TcStep } from '@auto-qa/tc';
+import {
+	listValuesAt,
+	normalize,
+	readListValidations,
+	readWorkbook,
+	resultCellWrites,
+	resultVocabulary,
+	suggestProfile,
+	writeResultInPlace
+} from '@auto-qa/tc';
+import type { ResultWrite, StepResult, TcCase, TcStep } from '@auto-qa/tc';
 import {
 	Session,
 	checkSpecMove,
@@ -66,8 +75,10 @@ const { values, positionals } = parseArgs({
 		out: { type: 'string', default: join(import.meta.dirname, 'out') },
 		/** 실행 없이 지난 결과(result.json)를 사람 판정과 비교 */
 		score: { type: 'string' },
-		/** 사람이 원래 P/F 열에 결과를 적은 엑셀 */
-		truth: { type: 'string' }
+		/** 사람이 P/F 열에 결과를 적은 엑셀 (QA 결과 보고서 등, 실행할 TC 파일과 다른 파일) */
+		truth: { type: 'string' },
+		/** TC 파일에 이미 값이 있는 P/F·이유 칸도 덮어쓴다 (다시 검수할 때) */
+		overwrite: { type: 'boolean', default: false }
 	}
 });
 const cwd = process.env['INIT_CWD'] ?? process.cwd();
@@ -796,6 +807,13 @@ function report(profile: AppProfile, url: string, tcFile: string, steps: readonl
 		''
 	];
 	if (sc !== null) lines.push('## 사람 판정과 비교', '', ...scoreText(sc).map((t) => `- ${t}`), '', ...sc.lines, '');
+	const review = steps.filter((s) => s.status === 'needs-review');
+	if (review.length > 0) {
+		// TC 파일에는 Passed + [확인 필요]로 적히므로(D-040) 사람이 볼 목록을 따로 둔다
+		lines.push('## 확인 필요 (TC에는 Passed + [확인 필요])', '');
+		for (const s of review) lines.push(`- ${s.key} ${s.screen} — ${cell(s.explanation.split('\n')[0] ?? '')}`);
+		lines.push('');
+	}
 	lines.push('## 단계', '', '| 단계 | 화면 | 콜아웃 | 자동 판정 | 판정 설명 |', '|---|---|---|---|---|');
 	for (const s of steps) {
 		lines.push(
@@ -822,65 +840,71 @@ function report(profile: AppProfile, url: string, tcFile: string, steps: readonl
 	return `${lines.join('\n')}\n`;
 }
 
-// ── 엑셀 사본 ───────────────────────────────────────────
+// ── TC 파일에 결과 쓰기 ─────────────────────────────────
 
-async function writeExcel(
-	tcFile: string,
-	output: string,
-	steps: readonly StepRun[],
-	screenPrefix: string
-): Promise<string> {
+/**
+ * 판정 결과를 사용자가 준 TC 파일(원본)에 양식 그대로 쓴다 (D-040): P/F 열에 그 파일의 드롭다운 값,
+ * 이유는 이슈 설명 열. 확인 필요는 Passed + [확인 필요] + 색. 확인한 조건이 없거나 실행하지 않은 단계는 쓰지 않는다.
+ * 쓰기 전에 백업을 남긴다. 이미 값이 있는 칸은 --overwrite일 때만 덮어쓴다.
+ */
+async function writeResults(tcFile: string, steps: readonly StepRun[], overwrite: boolean): Promise<string> {
 	const grid = await readWorkbook(tcFile);
 	const profile = suggestProfile(grid);
 	const cases = normalize(grid, profile).cases;
 	const byKey = new Map(steps.map((s) => [s.key, s]));
+	const validations = await readListValidations(tcFile);
 	const lines: string[] = [];
 	const writes: ResultWrite[] = [];
-	const merges: { sheet: string; ref: string }[] = [];
-	let allReused = true;
+	let notWritten = 0;
 	for (const sheetName of [...new Set(steps.map((s) => s.sheet))]) {
-		const sheet = grid.sheets.find((g) => g.name === sheetName);
 		const sp = profile.sheets.find((p) => p.sheet === sheetName);
-		if (sheet === undefined || sp === undefined) continue;
-		const cols = endColumns(sheet, sp.headerRow);
-		allReused &&= cols.reused;
-		const resultCol = sp.columns.result;
-		const values: StepValues[] = [];
+		if (sp === undefined || sp.columns.result === undefined) {
+			lines.push(`${sheetName}: P/F 열을 찾지 못해 쓰지 않음`);
+			continue;
+		}
+		const results: StepResult[] = [];
 		for (const c of cases.filter((x) => x.sheet === sheetName)) {
-			const screen = c.specRef?.screenId ?? '';
-			if (!(screen === screenPrefix || screen.startsWith(`${screenPrefix}.`))) continue;
 			for (const s of c.steps) {
 				const run = byKey.get(`${c.sheet}!${s.row}`);
-				let row: [string, string, string];
-				if (run !== undefined) {
-					const shot = run.screenshot === null ? '' : ` · 캡처 ${run.screenshot}`;
-					row = [STATUS_LABEL[run.status], run.explanation, `${run.basis}${shot}`];
-				} else if (s.automation === 'deferred')
-					row = ['보류', s.automationReason, `자동화 라벨: ${s.automationRule}`];
-				else if (s.automation === 'auto') continue;
-				else row = ['미실행', `자동화 대상 아님 (${s.automation})`, s.automationReason];
-				values.push({ row: s.row, rowSpan: s.rowSpan, values: row, styleFrom: s.resultCell?.address ?? null });
+				if (run === undefined || run.status === 'not-run' || s.resultCell === null) continue;
+				results.push({
+					resultCell: s.resultCell,
+					outcome: run.status,
+					reason: run.explanation,
+					checked: run.results.filter((r) => r.verdict !== null).length
+				});
 			}
 		}
-		const plan = endColumnWrites(cols, values, {
-			headerStyleFrom: resultCol === undefined ? null : `${resultCol}${sp.headerRow}`
-		});
+		const first = results[0]?.resultCell.address;
+		const listValues = first === undefined ? null : listValuesAt(validations.get(sheetName) ?? [], first);
+		const vocab = resultVocabulary(listValues);
+		if (vocab === null) {
+			lines.push(
+				`${sheetName}: P/F 드롭다운(${(listValues ?? []).join(', ')})에 Pass·Fail에 해당하는 값이 없어 쓰지 않음`
+			);
+			continue;
+		}
+		const issue = sp.columns.issue ?? sp.columns.note ?? null;
+		const plan = resultCellWrites(results, vocab, issue);
+		notWritten += plan.skipped.length;
 		writes.push(...plan.writes);
-		merges.push(...plan.merges);
 		lines.push(
-			`${sheetName}: ${cols.columns.join(', ')}열${cols.reused ? ' (이전 사본의 열을 다시 씀)' : ''}, 단계 ${values.length}개`
+			`${sheetName}: P/F ${sp.columns.result}열(${vocab.pass}/${vocab.fail}${vocab.source === 'list' ? ', 드롭다운' : ', 기본값'})` +
+				`, 이유 ${issue === null ? '열 없음(리포트에만)' : `${issue}열`}, 단계 ${results.length - plan.skipped.length}개`
 		);
 	}
-	// 전에 쓴 사본의 우리 열만 덮어쓴다. 새 열 자리에 사람이 쓴 값이 있으면 건드리지 않고 알린다 (D-028)
-	const rep = await writeResultCopy(tcFile, output, writes, { overwrite: allReused, merges });
-	lines.push(`쓴 칸 ${rep.written} · 값이 있어 건너뜀 ${rep.skipped.length} · 수식이라 건너뜀 ${rep.formula.length}`);
+	const rep = await writeResultInPlace(tcFile, writes, { overwrite });
+	lines.push(
+		`쓴 칸 ${rep.written} · 값이 있어 건너뜀 ${rep.skipped.length}${overwrite ? '' : ' (다시 쓰려면 --overwrite)'} · 수식이라 건너뜀 ${rep.formula.length} · 확인한 조건이 없어 안 씀 ${notWritten}`
+	);
 	if (rep.skipped.length > 0)
 		lines.push(
 			`  건너뛴 칸: ${rep.skipped
 				.slice(0, 10)
-				.map((c) => c.address)
-				.join(', ')}`
+				.map((c) => `${c.sheet}!${c.address}`)
+				.join(', ')}${rep.skipped.length > 10 ? ' …' : ''}`
 		);
+	lines.push(rep.backup === null ? '  바뀐 칸이 없어 파일을 그대로 둠' : `  백업: ${rep.backup}`);
 	return lines.join('\n');
 }
 
@@ -915,6 +939,11 @@ async function main(): Promise<void> {
 	if (keyMaps !== null) console.log(`화면설계서 화면 ${keyMaps.size}개: ${[...keyMaps.keys()].join(', ')}`);
 
 	const tcPath = resolve(cwd, tcFile);
+	if (values.truth !== undefined && resolve(cwd, values.truth) === tcPath) {
+		throw new Error(
+			'--truth는 실행할 TC 파일과 다른 파일이어야 합니다 (결과를 TC 파일에 쓰므로, D-040). QA 결과 보고서를 주세요.'
+		);
+	}
 	const grid = await readWorkbook(tcPath);
 	const cases = normalize(grid, suggestProfile(grid)).cases;
 	const only = values.only === undefined ? null : new Set(values.only.split(',').map((x) => x.trim()));
@@ -964,8 +993,7 @@ async function main(): Promise<void> {
 	}
 	console.log(`앱을 연 횟수: ${runner.opens}`);
 
-	const excel = join(out, `${basename(tcPath, '.xlsx')}-auto-qa-result.xlsx`);
-	console.log(`\n엑셀 사본: ${await writeExcel(tcPath, excel, steps, prefix)}`);
+	console.log(`\nTC 파일에 결과 쓰기 (${basename(tcPath)}):\n${await writeResults(tcPath, steps, values.overwrite)}`);
 	const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));
 	if (sc !== null) console.log(scoreText(sc).join('\n'));
 	await writeFile(join(out, 'report.md'), report(profile, ctx.url, basename(tcPath), steps, sc));
@@ -977,7 +1005,7 @@ async function main(): Promise<void> {
 	console.log(
 		`단계 ${steps.length}개 — Pass ${count('pass')} · Fail ${count('fail')} · 확인 필요 ${count('needs-review')} · 미실행 ${count('not-run')}`
 	);
-	console.log(`→ ${join(out, 'report.md')}\n→ ${excel}`);
+	console.log(`→ ${join(out, 'report.md')}\n→ ${tcPath}`);
 }
 
 main().catch((e: unknown) => {

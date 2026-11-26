@@ -1,11 +1,15 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import { cleanText } from './grid';
 import type { Grid, GridSheet, MergeRange } from './grid';
+import { listValidations } from './resultCells';
+import type { ListValidation } from './resultCells';
 import type { CellRef } from './types';
 import {
+	addFillStyle,
 	addMergeCells,
 	cellStyle,
 	parseSharedStrings,
@@ -79,6 +83,8 @@ export interface ResultWrite {
 	value: string;
 	/** 이 주소(같은 시트) 칸의 스타일을 따른다 (테두리·글꼴을 원본 표와 맞춤). 없으면 행·열 스타일 */
 	styleFrom?: string | null;
+	/** 칸에 표시 색을 칠한다 (확인 필요, D-040). 원래 서식을 복사해 칠만 바꾼다 */
+	highlight?: boolean;
 }
 
 export interface ResultWriteReport {
@@ -91,20 +97,27 @@ export interface ResultWriteReport {
 	changedParts: string[];
 }
 
-/**
- * 원본을 그대로 두고 사본에 결과를 쓴다 (D-028). 엑셀 라이브러리로 다시 저장하지 않고,
- * 사본 zip에서 해당 시트 XML의 결과 칸만 바꾼다. 이미 값이 있는 칸은 overwrite가 true일 때만 덮어쓴다.
- */
-export async function writeResultCopy(
-	sourcePath: string,
-	outputPath: string,
-	writes: readonly ResultWrite[],
-	options: { overwrite?: boolean; merges?: readonly { sheet: string; ref: string }[] } = {}
-): Promise<ResultWriteReport> {
-	if (resolve(sourcePath) === resolve(outputPath)) {
-		throw new Error('원본 파일에는 쓰지 않습니다. 다른 출력 경로를 지정해 주세요.');
-	}
-	const zip = await JSZip.loadAsync(await readFile(sourcePath));
+export interface ResultWriteOptions {
+	/** 이미 값이 있는 칸도 덮어쓴다 */
+	overwrite?: boolean;
+	merges?: readonly { sheet: string; ref: string }[];
+	/** 표시 색 (ARGB, 기본 연한 노랑) */
+	highlightColor?: string;
+}
+
+export const DEFAULT_HIGHLIGHT_COLOR = 'FFFFF2CC';
+
+interface Parts {
+	zip: JSZip;
+	text: (path: string) => Promise<string>;
+	workbookPath: string;
+	sheetPaths: Map<string, string>;
+	sharedStrings: string[];
+	stylesPath: string | null;
+}
+
+async function openParts(buffer: Buffer): Promise<Parts> {
+	const zip = await JSZip.loadAsync(buffer);
 	const text = async (path: string): Promise<string> => {
 		const file = zip.file(path);
 		if (file === null) throw new Error(`xlsx 안에 ${path}가 없습니다`);
@@ -112,19 +125,45 @@ export async function writeResultCopy(
 	};
 	const workbookPath = workbookPartPath(await text('_rels/.rels'));
 	const relsPath = `${dirname(workbookPath) === '.' ? '' : `${dirname(workbookPath)}/`}_rels/${basename(workbookPath)}.rels`;
+	const rels = [...relationshipTargets(await text(relsPath))];
 	const sheetPaths = sheetPartPaths(workbookPath, await text(workbookPath), await text(relsPath));
-	const sharedPath = [...relationshipTargets(await text(relsPath))].find(([type]) =>
-		type.endsWith('/sharedStrings')
-	)?.[1];
+	const sharedPath = rels.find(([type]) => type.endsWith('/sharedStrings'))?.[1];
 	const sharedStrings =
 		sharedPath === undefined ? [] : parseSharedStrings(await text(resolvePart(dirname(workbookPath), sharedPath)));
+	const stylesTarget = rels.find(([type]) => type.endsWith('/styles'))?.[1];
+	const stylesPath = stylesTarget === undefined ? null : resolvePart(dirname(workbookPath), stylesTarget);
+	return { zip, text, workbookPath, sheetPaths, sharedStrings, stylesPath };
+}
 
+/** 결과 칸만 XML로 고친 새 xlsx 바이트 (D-028) */
+async function patchWorkbook(
+	source: Buffer,
+	writes: readonly ResultWrite[],
+	options: ResultWriteOptions
+): Promise<{ buffer: Buffer; report: ResultWriteReport }> {
+	const { zip, text, sheetPaths, sharedStrings, stylesPath } = await openParts(source);
 	const report: ResultWriteReport = { written: 0, skipped: [], formula: [], changedParts: [] };
 	const bySheet = new Map<string, ResultWrite[]>();
 	for (const w of writes) bySheet.set(w.cell.sheet, [...(bySheet.get(w.cell.sheet) ?? []), w]);
 	const mergesBySheet = new Map<string, string[]>();
 	for (const m of options.merges ?? []) mergesBySheet.set(m.sheet, [...(mergesBySheet.get(m.sheet) ?? []), m.ref]);
 	for (const sheet of mergesBySheet.keys()) if (!bySheet.has(sheet)) bySheet.set(sheet, []);
+
+	// 표시 색: 원래 서식 번호마다 칠한 서식을 하나씩 만든다
+	let styles: string | null = null;
+	const filled = new Map<string, string>();
+	const highlightStyle = async (base: string | undefined): Promise<string> => {
+		const key = base ?? '0';
+		const known = filled.get(key);
+		if (known !== undefined) return known;
+		if (stylesPath === null) throw new Error('xlsx 안에 styles.xml이 없어 색을 칠할 수 없습니다');
+		styles ??= await text(stylesPath);
+		const added = addFillStyle(styles, Number(key), options.highlightColor ?? DEFAULT_HIGHLIGHT_COLOR);
+		styles = added.xml;
+		filled.set(key, String(added.index));
+		return String(added.index);
+	};
+
 	for (const [sheet, sheetWrites] of bySheet) {
 		const path = sheetPaths.get(sheet);
 		if (path === undefined) throw new Error(`시트가 없습니다: ${sheet}`);
@@ -132,8 +171,9 @@ export async function writeResultCopy(
 		let changed = false;
 		const original = xml;
 		for (const w of sheetWrites) {
-			const style =
+			let style =
 				w.styleFrom === undefined || w.styleFrom === null ? undefined : cellStyle(original, w.styleFrom);
+			if (w.highlight === true) style = await highlightStyle(style ?? cellStyle(original, w.cell.address));
 			const result = setCellText(xml, w.cell.address, w.value, {
 				overwrite: options.overwrite,
 				sharedStrings,
@@ -160,7 +200,72 @@ export async function writeResultCopy(
 			report.changedParts.push(path);
 		}
 	}
+	if (styles !== null && stylesPath !== null && report.written > 0) {
+		zip.file(stylesPath, styles, { createFolders: false });
+		report.changedParts.push(stylesPath);
+	}
 	const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+	return { buffer, report };
+}
+
+/**
+ * 원본을 그대로 두고 사본에 결과를 쓴다 (D-028). 엑셀 라이브러리로 다시 저장하지 않고,
+ * 사본 zip에서 해당 시트 XML의 결과 칸만 바꾼다. 이미 값이 있는 칸은 overwrite가 true일 때만 덮어쓴다.
+ */
+export async function writeResultCopy(
+	sourcePath: string,
+	outputPath: string,
+	writes: readonly ResultWrite[],
+	options: ResultWriteOptions = {}
+): Promise<ResultWriteReport> {
+	if (resolve(sourcePath) === resolve(outputPath)) {
+		throw new Error('원본 파일에는 쓰지 않습니다. 다른 출력 경로를 지정해 주세요.');
+	}
+	const { buffer, report } = await patchWorkbook(await readFile(sourcePath), writes, options);
 	await writeFile(outputPath, buffer);
 	return report;
+}
+
+/** 원본에 쓰기 전에 남기는 백업 파일 경로: `<이름>.before-auto-qa-<YYYYMMDD-HHmmss>.xlsx` (그 PC의 현지 시각) */
+export function backupPath(path: string, now: Date): string {
+	const ext = extname(path);
+	const p2 = (n: number): string => String(n).padStart(2, '0');
+	const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
+	return join(dirname(path), `${basename(path, ext)}.before-auto-qa-${stamp}${ext}`);
+}
+
+/**
+ * 사용자가 준 TC 파일(원본)에 양식 그대로 결과를 쓴다 (D-040). 바뀌는 칸이 있으면 먼저 백업을 남기고,
+ * 임시 파일에 쓴 뒤 바꿔 넣는다(쓰다 실패해도 원본이 깨지지 않음). 바뀌는 칸이 없으면 아무 파일도 만들지 않는다.
+ */
+export async function writeResultInPlace(
+	path: string,
+	writes: readonly ResultWrite[],
+	options: ResultWriteOptions & { now?: Date } = {}
+): Promise<ResultWriteReport & { backup: string | null }> {
+	const { buffer, report } = await patchWorkbook(await readFile(path), writes, options);
+	if (report.written === 0) return { ...report, backup: null };
+	const backup = backupPath(path, options.now ?? new Date());
+	await copyFile(path, backup, constants.COPYFILE_EXCL);
+	const tmp = `${path}.auto-qa-tmp`;
+	await writeFile(tmp, buffer);
+	try {
+		await rename(tmp, path);
+	} catch (error) {
+		await rm(tmp, { force: true });
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`TC 파일에 쓰지 못했습니다. 엑셀에서 열려 있으면 닫고 다시 실행해 주세요. 원본은 바뀌지 않았습니다 (백업: ${backup}). ${reason}`,
+			{ cause: error }
+		);
+	}
+	return { ...report, backup };
+}
+
+/** 시트별 목록형 데이터 유효성 (결과 칸의 드롭다운 값을 찾는 데 쓴다, D-040) */
+export async function readListValidations(path: string): Promise<Map<string, ListValidation[]>> {
+	const { text, sheetPaths } = await openParts(await readFile(path));
+	const out = new Map<string, ListValidation[]>();
+	for (const [sheet, part] of sheetPaths) out.set(sheet, listValidations(await text(part)));
+	return out;
 }

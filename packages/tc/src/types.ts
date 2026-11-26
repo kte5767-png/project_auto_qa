@@ -10,6 +10,8 @@ export type ColumnRole =
 	| 'action'
 	| 'expected'
 	| 'result'
+	/** 결과 이유를 쓰는 열 (예: Issue Detail). Fail 이유·확인 필요 이유를 여기에 쓴다 (D-040) */
+	| 'issue'
 	| 'note'
 	| 'severity';
 
