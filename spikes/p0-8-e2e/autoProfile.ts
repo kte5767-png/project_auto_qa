@@ -200,6 +200,24 @@ export function chooseDetects(
 	return out;
 }
 
+/**
+ * 고른 표시를 화면 정의에 넣을 값으로. 첫 화면은 씨앗 표시를 그대로 둔다(처음 화면을 알아보는 값).
+ * 앞 화면과 구별되는 요소가 없으면 같은 패널의 상태 변형으로 보고 앞 화면 표시를 함께 쓴다
+ * (예: 키보드가 열린 화면과 닫힌 화면 — 같은 표시여야 이미 떠 있는 패널을 이어 쓴다). 못 고르면 주어진 프로필 표시
+ */
+export function settleDetect(
+	choice: DetectChoice | null,
+	at: { current: string; from: string | null; fromDetect: string | null; given: string | null }
+): { detect: string; note: string } {
+	if (at.from === null) return { detect: at.current, note: '첫 화면은 씨앗 표시를 씀' };
+	if (choice !== null && at.fromDetect !== null && choice.sharedWith.includes(at.from))
+		return { detect: at.fromDetect, note: `앞 화면 ${at.from}과 구별되지 않아 앞 화면 표시를 함께 씀` };
+	if (choice !== null) return { detect: choice.selector, note: '' };
+	return at.given === null
+		? { detect: at.current, note: '고르지 못함' }
+		: { detect: at.given, note: '주어진 프로필 표시' };
+}
+
 /** 자동 프로필 화면 하나 */
 export function autoScreen(
 	item: AutoPlanItem,

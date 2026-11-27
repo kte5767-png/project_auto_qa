@@ -140,7 +140,8 @@ import {
 	planAutoEntries,
 	sameView,
 	seedOf,
-	seedQuery
+	seedQuery,
+	settleDetect
 } from './autoProfile';
 import type { AutoPlanItem } from './autoProfile';
 import { DEFAULT_TIMING, parseCalloutRef } from './scenario';
@@ -2790,15 +2791,18 @@ async function autoMain(
 	for (const [screen, choice] of detects) {
 		const def = auto.screens[screen];
 		if (def === undefined) continue;
-		const root = def.from === undefined;
-		if (!root) {
-			if (choice !== null) def.detect = choice.selector;
-			else if (profile.screens[screen] !== undefined) def.detect = profile.screens[screen].detect;
-		}
+		const from = def.from ?? null;
+		const settled = settleDetect(choice, {
+			current: def.detect,
+			from,
+			fromDetect: from === null ? null : (auto.screens[from]?.detect ?? null),
+			given: profile.screens[screen]?.detect ?? null
+		});
+		def.detect = settled.detect;
 		if (def.detect === PENDING_DETECT)
 			errors.push(`${screen}: 화면 표시를 정하지 못함 (TC 실행에서 이 화면을 알아볼 수 없음)`);
 		detectRows.push(
-			`- ${screen}: ${choice === null ? '고르지 못함' : `\`${choice.selector}\` (${choice.reason})`}${root ? ' — 첫 화면은 씨앗 표시를 씀' : choice === null ? ' → 주어진 프로필 표시' : ''}`
+			`- ${screen}: ${choice === null ? '고르지 못함' : `\`${choice.selector}\` (${choice.reason})`}${settled.note === '' ? '' : ` → ${settled.note}`}${settled.detect === choice?.selector ? '' : ` (\`${settled.detect}\`)`}`
 		);
 	}
 	const invalid = validateProfile(auto);

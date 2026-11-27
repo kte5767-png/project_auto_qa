@@ -3,7 +3,16 @@ import type { DomNode, DomSnapshot } from '@auto-qa/focus';
 import { buildScreenGraph } from '@auto-qa/planner';
 import type { AppScreenLink, GraphCallout, GraphScreen, ScreenEdge } from '@auto-qa/planner';
 import { describe, expect, it } from 'vitest';
-import { chooseDetects, edgeEntry, inputCallout, planAutoEntries, sameView, seedOf, seedQuery } from './autoProfile';
+import {
+	chooseDetects,
+	edgeEntry,
+	inputCallout,
+	planAutoEntries,
+	sameView,
+	seedOf,
+	seedQuery,
+	settleDetect
+} from './autoProfile';
 import type { AppProfile } from './profile';
 
 const r = (x: number, y: number, width: number, height: number): Rect => ({ x, y, width, height });
@@ -183,5 +192,15 @@ describe('화면 표시·입력란', () => {
 		const moved = { ...SEARCH, nodes: SEARCH.nodes.map((n) => ({ ...n, focused: n.i === 1 })) };
 		expect(sameView(SEARCH, moved)).toBe(true);
 		expect(sameView(SEARCH, RESULT)).toBe(false);
+	});
+
+	it('앞 화면과 구별되지 않는 표시는 앞 화면 표시를 함께 쓰고, 첫 화면은 씨앗, 못 고르면 주어진 프로필', () => {
+		const shared = { selector: '.cities', sharedWith: ['9.2', '9.3'], reason: '' };
+		const at = { current: ':not(*)', from: '9.2', fromDetect: '.panel', given: '.given' };
+		expect(settleDetect(shared, at).detect).toBe('.panel');
+		expect(settleDetect({ ...shared, sharedWith: ['9.3'] }, at).detect).toBe('.cities');
+		expect(settleDetect(null, at).detect).toBe('.given');
+		expect(settleDetect(null, { ...at, given: null }).detect).toBe(':not(*)');
+		expect(settleDetect(shared, { ...at, current: '.seed', from: null }).detect).toBe('.seed');
 	});
 });
