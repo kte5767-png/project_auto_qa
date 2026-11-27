@@ -35,6 +35,7 @@ import {
 	DEFAULT_ROUTE_OPTIONS,
 	buildKeyMap,
 	defaultFocusTarget,
+	matchByName,
 	nameScore,
 	overrideKeyTexts,
 	planRoute,
@@ -102,6 +103,8 @@ const { values, positionals } = parseArgs({
 		score: { type: 'string' },
 		/** 사람이 P/F 열에 결과를 적은 엑셀 (QA 결과 보고서 등, 실행할 TC 파일과 다른 파일) */
 		truth: { type: 'string' },
+		/** 일부러 틀린 TC의 바꾼 목록 (mutate.ts가 만든 <TC>.mutations.json) — 바꾼 조건을 Fail로 잡았는지 잰다 */
+		mutations: { type: 'string' },
 		/** TC 파일에 이미 값이 있는 P/F·이유 칸도 덮어쓴다 (다시 검수할 때) */
 		overwrite: { type: 'boolean', default: false },
 		/** 실행 폴더 이름 (사용자 UI가 정해 넘긴다, tc-로 시작). 없으면 시각으로 만든다 */
@@ -215,6 +218,27 @@ function listPrevKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 function nameScope(registry: ElementRegistry, screen: string, before: Observation): Record<string, ElementDef> {
 	const shown = Object.entries(registry.upstream(screen)).filter(([n]) => (target(before, n)?.visible ?? 0) > 0);
 	return { ...registry.scoped(screen), ...Object.fromEntries(shown) };
+}
+
+/**
+ * TC "X가 없을 경우 Y"의 X가 화면에 보이는가. X를 앱 요소 이름(모든 화면)에서 찾고, 그 요소가 관찰에 없으면
+ * 그 요소가 속한 화면의 표시(@화면)로 본다. 이름에 맞는 요소가 없으면 null (조건을 고르지 않음, 추측하지 않음)
+ */
+function presentIn(
+	registry: ElementRegistry,
+	options: KeyMapOptions
+): (name: string, obs: Observation) => boolean | null {
+	const candidates = Object.entries(registry.elements).filter(([n]) => !n.startsWith('@'));
+	return (name, obs) => {
+		const m = matchByName(name, candidates, ([n, e]) => [n, ...(e.names ?? [])], options);
+		if (m === null) return null;
+		const [element, def] = m.match;
+		const t = target(obs, element);
+		if (t !== undefined) return t.visible > 0;
+		const screen = (def.callout ?? '').split('#')[0] ?? '';
+		const shown = screen === '' ? undefined : target(obs, `@${screen} 화면`);
+		return shown === undefined ? null : shown.visible > 0;
+	};
 }
 
 /**
@@ -931,7 +955,8 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		no,
 		texts: Object.fromEntries(
 			keyChecks.flatMap(({ clause }) => (clause.key === null ? [] : [[clause.key, clause.text]]))
-		) as TcKeyTexts['texts']
+		) as TcKeyTexts['texts'],
+		present: presentIn(ctx.registry, ctx.options)
 	};
 	for (const { clause, check } of keyChecks) {
 		if (ctx.navs.get(screen) === undefined && ctx.keyMaps?.get(screen) === undefined) {
@@ -1204,16 +1229,108 @@ const pct = (n: number, d: number): string => (d === 0 ? '-' : `${n}/${d} (${Mat
 
 function scoreText(sc: Score): string[] {
 	return [
+		`원본 QA와 같은 판정 ${pct(sc.agree, sc.labelled)} (확인 필요·미실행은 다른 것으로 셈)`,
 		`사람이 P/F를 적은 단계 ${sc.labelled}개 — 자동 판정(Pass/Fail) ${pct(sc.decided, sc.labelled)}, 확인 필요 ${sc.review}, 미실행 ${sc.notRun}`,
 		`일치율(자동 판정한 단계 중) ${pct(sc.agree, sc.decided)} · 틀린 Pass ${sc.falsePass.length} · 틀린 Fail ${sc.falseFail.length}`
 	];
+}
+
+// ── 틀린 TC 검출 (mutate.ts) ───────────────────────────
+
+interface MutationEntryLite {
+	key: string;
+	op: string;
+	before: string;
+	after: string;
+}
+
+interface Detection {
+	total: number;
+	caught: string[];
+	missed: string[];
+	undecided: string[];
+	lines: string[];
+}
+
+/** 바꾼 키 조건마다: 엔진이 Fail로 잡았나(검출) / Pass로 넘겼나(놓침, 틀린 Pass) / 판정 못 했나 */
+function detection(steps: readonly StepRun[], mutations: readonly MutationEntryLite[]): Detection {
+	const d: Detection = { total: mutations.length, caught: [], missed: [], undecided: [], lines: [] };
+	d.lines.push('| 단계 | 바꾼 조건 | 결과 | 설명 |', '|---|---|---|---|');
+	for (const m of mutations) {
+		const step = steps.find((x) => x.key === m.key);
+		const r = step?.results.find((x) => x.kind === 'key' && x.clause === m.after);
+		let mark: string;
+		if (r?.verdict === 'fail') {
+			d.caught.push(m.key);
+			mark = '검출';
+		} else if (r?.verdict === 'pass') {
+			d.missed.push(m.key);
+			mark = '**놓침(틀린 Pass)**';
+		} else {
+			d.undecided.push(m.key);
+			mark = step === undefined || step.status === 'not-run' ? '미실행' : '판정 못 함';
+		}
+		const why = r?.explanation ?? step?.explanation ?? '실행 안 됨';
+		d.lines.push(
+			`| ${m.key} | ${cell(`${m.before} → ${m.after}`)} | ${mark} | ${cell(why.split('\n')[0] ?? '')} |`
+		);
+	}
+	return d;
+}
+
+function detectionText(d: Detection): string[] {
+	return [
+		`틀린 TC 검출 ${pct(d.caught.length, d.total)} · 놓침(틀린 Pass) ${d.missed.length} · 판정 못 함 ${d.undecided.length}`
+	];
+}
+
+async function readMutations(path: string): Promise<MutationEntryLite[]> {
+	const saved = JSON.parse(await readFile(path, 'utf8')) as { format?: string; mutations?: MutationEntryLite[] };
+	if (saved.format !== 'auto-qa/tc-mutations') throw new Error('바꾼 목록 파일 형식이 아님 (auto-qa/tc-mutations)');
+	return saved.mutations ?? [];
+}
+
+/**
+ * Pass가 아닌 단계가 어디서 막혔는지 (일치율을 올릴 곳을 층별로 본다). 판정과 무관한 집계이며,
+ * 설명 글자의 정해진 문구로 나눈다 (엔진이 직접 쓰는 문구라 앱·TC와 무관)
+ */
+const LAYERS: { layer: string; status: StepStatus; pattern: RegExp }[] = [
+	{ layer: '콜아웃 표시 없는 단계', status: 'not-run', pattern: /콜아웃 참조가 없음/ },
+	{ layer: '진입 경로 없음', status: 'not-run', pattern: /진입 경로가 없음/ },
+	{ layer: '요소 대응 없음', status: 'not-run', pattern: /대응 요소가 없음/ },
+	{ layer: '진입 실패 (환경·데이터)', status: 'not-run', pattern: /진입 실패/ },
+	{ layer: 'TV에서만 확인', status: 'needs-review', pattern: /TV에서만|실기기에서/ },
+	{ layer: '검사 종류 없음', status: 'needs-review', pattern: /자동 확인은 아직 없음|motion|확인 기능이 없음/ },
+	{ layer: '문장 해석 애매', status: 'needs-review', pattern: /정하지 못|사람 확인/ }
+];
+
+function layerOf(step: StepRun): string {
+	if (step.status === 'pass') return 'Pass';
+	if (step.status === 'fail') return 'Fail';
+	return (
+		LAYERS.find((l) => l.status === step.status && l.pattern.test(step.explanation))?.layer ??
+		`${STATUS_LABEL[step.status]} (기타)`
+	);
+}
+
+function layerText(steps: readonly StepRun[]): string[] {
+	const counts = new Map<string, string[]>();
+	for (const s of steps) counts.set(layerOf(s), [...(counts.get(layerOf(s)) ?? []), s.key]);
+	return [...counts.entries()].map(([layer, keys]) => `${layer} ${keys.length}: ${keys.join(', ')}`);
 }
 
 // ── 리포트 ──────────────────────────────────────────────
 
 const cell = (t: string): string => t.replace(/\|/g, '\\|').replace(/\n/g, '<br>');
 
-function report(profile: AppProfile, url: string, tcFile: string, steps: readonly StepRun[], sc: Score | null): string {
+function report(
+	profile: AppProfile,
+	url: string,
+	tcFile: string,
+	steps: readonly StepRun[],
+	sc: Score | null,
+	det: Detection | null = null
+): string {
 	const count = (st: StepStatus): number => steps.filter((s) => s.status === st).length;
 	const all = steps.flatMap((s) => s.results);
 	const lines = [
@@ -1225,7 +1342,10 @@ function report(profile: AppProfile, url: string, tcFile: string, steps: readonl
 		`- 조건 ${all.length}개 — 코드 판정 ${all.filter((r) => r.oracle === 'code').length} · AI 대상 ${all.filter((r) => r.oracle === 'ai').length} · 확인 불가 ${all.filter((r) => r.oracle === 'none').length}`,
 		''
 	];
+	lines.push('## 막힌 곳 (층별)', '', ...layerText(steps).map((t) => `- ${t}`), '');
 	if (sc !== null) lines.push('## 사람 판정과 비교', '', ...scoreText(sc).map((t) => `- ${t}`), '', ...sc.lines, '');
+	if (det !== null)
+		lines.push('## 틀린 TC 검출', '', ...detectionText(det).map((t) => `- ${t}`), '', ...det.lines, '');
 	const review = steps.filter((s) => s.status === 'needs-review');
 	if (review.length > 0) {
 		// TC 파일에는 Passed + [확인 필요]로 적히므로(D-040) 사람이 볼 목록을 따로 둔다
@@ -1331,15 +1451,25 @@ async function writeResults(tcFile: string, steps: readonly StepRun[], overwrite
 
 async function main(): Promise<void> {
 	if (values.score !== undefined) {
-		if (values.truth === undefined) throw new Error('--score에는 --truth(사람이 P/F 적은 엑셀)가 필요합니다');
+		if (values.truth === undefined && values.mutations === undefined) {
+			throw new Error('--score에는 --truth(사람이 P/F 적은 엑셀)나 --mutations(틀린 TC 바꾼 목록)가 필요합니다');
+		}
 		const saved = JSON.parse(await readFile(resolve(cwd, values.score), 'utf8')) as {
 			format: string;
 			steps: StepRun[];
 		};
 		if (saved.format !== RESULT_FORMAT) throw new Error(`결과 파일 형식이 아님 (${RESULT_FORMAT})`);
-		const sc = score(saved.steps, await readTruth(resolve(cwd, values.truth)));
-		console.log(scoreText(sc).join('\n'));
-		console.log(sc.lines.join('\n'));
+		console.log(layerText(saved.steps).join('\n'));
+		if (values.truth !== undefined) {
+			const sc = score(saved.steps, await readTruth(resolve(cwd, values.truth)));
+			console.log(scoreText(sc).join('\n'));
+			console.log(sc.lines.join('\n'));
+		}
+		if (values.mutations !== undefined) {
+			const det = detection(saved.steps, await readMutations(resolve(cwd, values.mutations)));
+			console.log(detectionText(det).join('\n'));
+			console.log(det.lines.join('\n'));
+		}
 		return;
 	}
 
@@ -1482,8 +1612,14 @@ async function main(): Promise<void> {
 		);
 		const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));
 		if (sc !== null) console.log(scoreText(sc).join('\n'));
+		const det =
+			values.mutations === undefined
+				? null
+				: detection(steps, await readMutations(resolve(cwd, values.mutations)));
+		if (det !== null) console.log(detectionText(det).join('\n'));
+		console.log(layerText(steps).join('\n'));
 		live.phase('리포트 쓰는 중');
-		await writeFile(join(out, 'report.md'), report(profile, url, basename(tcPath), steps, sc));
+		await writeFile(join(out, 'report.md'), report(profile, url, basename(tcPath), steps, sc, det));
 		await writeFile(
 			join(out, 'result.json'),
 			`${JSON.stringify({ format: RESULT_FORMAT, version: 1, tc: basename(tcPath), url, steps }, null, '\t')}\n`

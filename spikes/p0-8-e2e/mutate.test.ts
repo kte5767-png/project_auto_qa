@@ -1,0 +1,96 @@
+import type { TcCase, TcStep } from '@auto-qa/tc';
+import { describe, expect, it } from 'vitest';
+import { planMutations } from './mutate';
+
+/** 합성 TC (회사 자료 아님): 9.2 화면 콜아웃 ①·②, 9.3 화면 콜아웃 ① */
+function step(row: number, callout: string, label: string, expected: string): TcStep {
+	return {
+		row,
+		rowSpan: 1,
+		stepNo: null,
+		caseNo: null,
+		precondition: null,
+		action: `(${callout}) ${label}`,
+		actions: [`(${callout}) ${label}`],
+		expected,
+		expectedItems: [expected],
+		note: null,
+		resultCell: null,
+		existingResult: null,
+		references: [],
+		targetRef: { callout, label },
+		automation: 'auto',
+		automationRule: 'test',
+		automationReason: 'test'
+	};
+}
+
+function tcCase(screen: string, steps: TcStep[]): TcCase {
+	return {
+		key: `Search!${steps[0]?.row ?? 0}`,
+		sheet: 'Search',
+		id: `scenario_v1.0_${screen}`,
+		title: null,
+		category: null,
+		firstRow: steps[0]?.row ?? 0,
+		lastRow: steps.at(-1)?.row ?? 0,
+		specRef: { raw: screen, version: null, screenId: screen },
+		steps
+	};
+}
+
+const CASES = [
+	tcCase('9.2', [
+		step(2, '1', 'Search box', '1)포커스 시\n[▲] 동작 없음\n[▼] Top Picks 첫 번째 항목 포커스'),
+		step(3, '2', 'Top Picks', '[▲] Search box 포커스\n[▼] 동작 없음'),
+		step(4, '3', 'Weekly Cities', '[▲] Top Picks 포커스')
+	]),
+	tcCase('9.3', [step(9, '1', 'Recent', '[▼] 동작 없음')])
+];
+
+const pass = (clause: string): { clause: string; kind: string; verdict: string } => ({
+	clause,
+	kind: 'key',
+	verdict: 'pass'
+});
+
+describe('planMutations', () => {
+	const baseline = [
+		{
+			key: 'Search!2',
+			status: 'fail',
+			results: [
+				{ clause: '[▼] Top Picks 첫 번째 항목 포커스', kind: 'key', verdict: 'fail' },
+				pass('[▲] 동작 없음')
+			]
+		},
+		{ key: 'Search!3', status: 'pass', results: [pass('[▲] Search box 포커스'), pass('[▼] 동작 없음')] },
+		{
+			key: 'Search!4',
+			status: 'needs-review',
+			results: [{ clause: '[▲] Top Picks 포커스', kind: 'key', verdict: null }]
+		},
+		{ key: 'Search!9', status: 'pass', results: [pass('[▼] 동작 없음')] }
+	];
+	const plan = planMutations(CASES, baseline, () => 'G', null);
+
+	it('원래 실행에서 Pass였던 키 조건만, 단계마다 하나씩 바꾼다', () => {
+		expect(plan.mutations.map((m) => [m.key, m.op, m.before, m.after])).toEqual([
+			['Search!2', 'none-to-move', '[▲] 동작 없음', '[▲] Top Picks 포커스'],
+			['Search!3', 'move-to-none', '[▲] Search box 포커스', '[▲] 동작 없음']
+		]);
+		expect(plan.mutations[0]?.cell).toEqual({ sheet: 'Search', row: 2, column: 'G', address: 'G2' });
+		expect(plan.mutations[1]?.text).toBe('[▲] 동작 없음\n[▼] 동작 없음');
+	});
+
+	it('Pass인 키 조건이 없거나, 같은 화면에 다른 콜아웃 이름이 없으면 건너뛴다 (측정에서 뺌)', () => {
+		expect(plan.skipped).toEqual([
+			{ key: 'Search!4', reason: '원래 실행에서 Pass인 키 조건이 없음' },
+			{ key: 'Search!9', reason: 'Pass인 키 조건을 바꿀 수 없음 (다른 콜아웃 이름 없음)' }
+		]);
+	});
+
+	it('시트를 고르면 그 시트만', () => {
+		expect(planMutations(CASES, baseline, () => 'G', 'Home').mutations).toEqual([]);
+	});
+});

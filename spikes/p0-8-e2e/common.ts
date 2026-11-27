@@ -20,6 +20,7 @@ import {
 	matchByName,
 	navScreenFromSpec,
 	overrideKeyTexts,
+	resolveAbsentCondition,
 	resolveTextValue
 } from '@auto-qa/planner';
 import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
@@ -390,6 +391,11 @@ export interface TcKeyTexts {
 	screen: string;
 	no: string;
 	texts: Partial<Record<SpecKey, string>>;
+	/**
+	 * TC "X가 없을 경우 Y"의 X가 누르기 전 화면에 보이는가 (모르면 null → 조건을 고르지 않음).
+	 * 없으면 판정에서 조건을 쓰지 않는다
+	 */
+	present?: (name: string, obs: Observation) => boolean | null;
 }
 
 /**
@@ -424,9 +430,17 @@ export function checkSpecMove(
 	// 판정 기준은 TC: 확인하는 콜아웃에서 누른 키면 TC 문장으로 다시 해석해 바꿔 끼운다. 화면설계서와 다르면 설명에 남긴다
 	let basisName = '화면설계서';
 	let specNote = '';
+	let conditionNote = '';
 	const nav = ref === null ? undefined : spec.navs?.get(ref.screen);
 	if (ref !== null && tc !== null && tc.screen === ref.screen && tc.no === ref.no && nav !== undefined) {
-		const o = overrideKeyTexts(actions ?? [], nav, ref.no, tc.texts, spec.options);
+		// "X가 없을 경우 Y": 누르기 전 화면에 X가 있는지로 문장 하나를 고른다
+		const texts: Partial<Record<SpecKey, string>> = {};
+		for (const [k, t] of Object.entries(tc.texts) as [SpecKey, string][]) {
+			const r = resolveAbsentCondition(t, (name) => tc.present?.(name, before) ?? null);
+			texts[k] = r.text;
+			if (k === specKey && r.note !== null) conditionNote = ` (${r.note})`;
+		}
+		const o = overrideKeyTexts(actions ?? [], nav, ref.no, texts, spec.options);
 		const mine = o.tc[specKey];
 		if (mine !== undefined) {
 			actions = o.actions;
@@ -441,6 +455,7 @@ export function checkSpecMove(
 				specNote = ` — 화면설계서는 "${old.text}"`;
 		}
 	}
+	specNote = `${conditionNote}${specNote}`;
 	if (ref === null || actions === undefined) {
 		return result(label, 'key', null, `화면설계서에 ${ref?.screen ?? '?'} 화면이 없음`);
 	}

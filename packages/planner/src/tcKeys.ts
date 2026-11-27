@@ -98,3 +98,41 @@ export function overrideKeyTexts(
 		spec
 	};
 }
+
+/** TC 키 문장의 "X가 없을 경우 Y" 조건 */
+const ABSENT = /^-?\s*(.+?)\s*(?:이|가)\s*없(?:을|는)\s*(?:경우|때)(?:에는|에)?\s*[:：,]?\s*(.+)$/;
+
+export interface AbsentResolution {
+	/** 판정에 쓸 TC 문장 (키 표시 포함) */
+	text: string;
+	/** 조건을 적용했으면 그 설명, 조건이 없거나 정하지 못했으면 null */
+	note: string | null;
+}
+
+/**
+ * "[▲] 최근검색어에 포커스 / 최근검색어가 없을 경우 추천검색어의 라스트포커스로 이동" (Search!24)처럼 TC가 대상의 유무로
+ * 기대 동작을 나누면, 누르기 전 화면에 X가 있는지(present)로 하나를 고른다. 있으면 앞 문장, 없으면 Y.
+ * present가 null(그런 이름의 요소를 모름)이면 고르지 않고 그대로 둔다 (추측해서 Fail을 만들지 않음).
+ * 조건 말고 다른 " / " 조건(이동 이력 등)은 앞 문장을 쓸 때만 남긴다.
+ */
+export function resolveAbsentCondition(text: string, present: (name: string) => boolean | null): AbsentResolution {
+	const clean = text.replace(/[︎️]/g, '');
+	const mark = KEY_MARK.exec(clean)?.[0] ?? '';
+	const [main = '', ...rest] = clean.slice(mark.length).split(/\s+\/\s+/);
+	const index = rest.findIndex((r) => ABSENT.test(r.trim()));
+	if (index < 0) return { text, note: null };
+	const m = ABSENT.exec(rest[index]?.trim() ?? '');
+	const subject = m?.[1]?.trim() ?? '';
+	const then = m?.[2]?.trim() ?? '';
+	if (subject === '' || then === '') return { text, note: null };
+	const seen = present(subject);
+	if (seen === null) return { text, note: null };
+	if (seen) {
+		const others = rest.filter((_, i) => i !== index);
+		return {
+			text: [`${mark}${main.trim()}`, ...others].join(' / '),
+			note: `${subject}이(가) 화면에 있어 앞 문장으로 판정`
+		};
+	}
+	return { text: `${mark}${then}`, note: `${subject}이(가) 화면에 없어 "${then}"로 판정` };
+}

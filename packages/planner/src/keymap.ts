@@ -60,6 +60,11 @@ export interface KeyMapOptions {
 	prevWords: string[];
 	lastWords: string[];
 	memoryWords: string[];
+	/**
+	 * 본문이 "마지막으로 포커스했던 곳"으로 가라고 할 때의 말 (예: "추천검색어의 라스트포커스로 이동").
+	 * 이력 위치(memory)로 읽고, 이름·"마지막 항목"을 찾을 때는 이 말을 뺀다
+	 */
+	lastFocusWords: string[];
 	endNoopWords: string[];
 	/** 이름 비교에서 빼는 일반 낱말 */
 	stopWords: string[];
@@ -92,6 +97,14 @@ export const DEFAULT_KEYMAP_OPTIONS: KeyMapOptions = {
 	prevWords: ['이전'],
 	lastWords: ['마지막'],
 	memoryWords: ['이동한 이력', '이력이 있을'],
+	lastFocusWords: [
+		'라스트 포커스',
+		'라스트포커스',
+		'마지막 포커스한',
+		'마지막으로 포커스한',
+		'마지막 포커스',
+		'마지막으로 포커스'
+	],
 	endNoopWords: ['더 이상'],
 	stopWords: [
 		'영역',
@@ -170,7 +183,7 @@ function f1(a: readonly string[], b: readonly string[]): number {
 
 /** 두 이름의 낱말 일치(F1, 0~1). 조사·일반 낱말은 빼고 비교한다 */
 export function nameScore(a: string, b: string, options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS): number {
-	return f1(nameTokens(a, options), nameTokens(b, options));
+	return spacedF1(nameTokens(a, options), nameTokens(b, options));
 }
 
 /** 콜아웃 이름 + 사람이 정한 다른 이름 */
@@ -183,9 +196,38 @@ function namesOf(c: NavCallout, options: KeyMapOptions): string[] {
 	return out;
 }
 
+/**
+ * 띄어쓰기 차이 맞추기: a의 낱말 하나가 b의 이어진 낱말들을 붙인 것과 같으면 그 낱말들로 나눈다
+ * ("추천검색어" ↔ "추천 검색어"). TC·화면설계서는 같은 이름을 붙여 쓰기도 띄어 쓰기도 한다
+ */
+export function splitLikeOther(a: readonly string[], b: readonly string[]): string[] {
+	const out: string[] = [];
+	for (const t of a) {
+		let parts: string[] | null = null;
+		for (let i = 0; i < b.length && parts === null; i++) {
+			let joined = '';
+			for (let j = i; j < b.length; j++) {
+				joined += b[j];
+				if (joined.length > t.length) break;
+				if (j > i && joined === t) {
+					parts = b.slice(i, j + 1);
+					break;
+				}
+			}
+		}
+		out.push(...(parts ?? [t]));
+	}
+	return out;
+}
+
+/** 띄어쓰기를 맞춘 F1 (양쪽 모두 상대 낱말 기준으로 나눈 뒤 비교) */
+export function spacedF1(a: readonly string[], b: readonly string[]): number {
+	return f1(splitLikeOther(a, b), splitLikeOther(b, a));
+}
+
 function bestNameScore(phrase: readonly string[], c: NavCallout, options: KeyMapOptions): number {
 	let best = 0;
-	for (const n of namesOf(c, options)) best = Math.max(best, f1(phrase, nameTokens(n, options)));
+	for (const n of namesOf(c, options)) best = Math.max(best, spacedF1(phrase, nameTokens(n, options)));
 	return best;
 }
 
@@ -244,6 +286,10 @@ export function calloutsInDirection(
 	return scored.map((s) => s.c);
 }
 
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function hasAny(text: string, words: readonly string[]): boolean {
 	return words.some((w) => text.includes(w));
 }
@@ -258,8 +304,13 @@ export function parseKeyAction(
 ): KeyAction {
 	const raw = normalize(text);
 	const conditions = [...raw.matchAll(/\(([^)]*)\)/g)].map((m) => m[1] ?? '');
-	const main = normalize(raw.replace(/\([^)]*\)/g, ' '));
-	const memory = conditions.some((c) => hasAny(c, options.memoryWords));
+	const body = normalize(raw.replace(/\([^)]*\)/g, ' '));
+	const lastFocus = [...options.lastFocusWords].sort((a, b) => b.length - a.length).find((w) => body.includes(w));
+	const main =
+		lastFocus === undefined
+			? body
+			: normalize(body.replace(new RegExp(`${escapeRegExp(lastFocus)}(?:으로|로|에|을|를)?`, 'g'), ' '));
+	const memory = lastFocus !== undefined || conditions.some((c) => hasAny(c, options.memoryWords));
 	const endNoop = conditions.some((c) => hasAny(c, options.endNoopWords));
 	const base = { from: from.no, key, text: raw, endNoop, estimate: null };
 	const done = (effect: KeyEffect, reason: string): KeyAction => ({ ...base, effect, reason });

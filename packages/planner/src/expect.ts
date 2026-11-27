@@ -1,5 +1,5 @@
 import type { SpecKey } from '@auto-qa/spec';
-import { DEFAULT_KEYMAP_OPTIONS, describeEffect, nameScore, nameTokens } from './keymap';
+import { DEFAULT_KEYMAP_OPTIONS, describeEffect, nameScore, nameTokens, splitLikeOther } from './keymap';
 import type { KeyAction, KeyMapOptions } from './keymap';
 
 /**
@@ -144,8 +144,11 @@ function covered(p: readonly string[], q: readonly string[]): boolean {
  * "GNB" ↔ "GNB 검색", "추천 검색어" ↔ "4.2 ② 추천 검색어"는 한쪽이 다른 쪽에 들어 있어 점수를 준다.
  */
 export function containedNameScore(a: string, b: string, options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS): number {
-	const x = nameTokens(a, options);
-	const y = nameTokens(b, options);
+	const x0 = nameTokens(a, options);
+	const y0 = nameTokens(b, options);
+	// 띄어쓰기 차이("추천검색어" ↔ "추천 검색어")는 같은 이름으로 본다
+	const x = splitLikeOther(x0, y0);
+	const y = splitLikeOther(y0, x0);
 	if (!covered(x, y) && !covered(y, x)) return 0;
 	return nameScore(a, b, options);
 }
