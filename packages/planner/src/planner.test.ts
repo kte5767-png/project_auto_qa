@@ -122,6 +122,21 @@ describe('키 동작 해석', () => {
 		expect(parse('up', '위 쉘프 영역 마지막 포커스로 이동')).not.toBe('row-prev');
 	});
 
+	it('이름 없이 "첫 번째 콘텐츠"만 말하면 키 방향에서 가장 가까운 콜아웃의 첫 항목이다', () => {
+		const screen = sampleScreen();
+		const from = screen.callouts[1];
+		if (from === undefined) throw new Error('콜아웃 없음');
+		const first = parseKeyAction(from, 'down', '좌측 상단 첫 번째 콘텐츠 포커스', screen.callouts);
+		expect(describeEffect(first.effect)).toBe('move:3:first');
+		expect(first.estimate).toBeNull();
+		// 이름이 있으면 이름이 먼저
+		expect(describeEffect(parseKeyAction(from, 'down', 'Weekly Cities 첫 번째 항목', screen.callouts).effect)).toBe(
+			'move:4:first'
+		);
+		// 항목 낱말 없이 "첫 번째"만이면 정하지 않는다
+		expect(parseKeyAction(from, 'down', '첫 번째 버튼 포커스', screen.callouts).effect.kind).not.toBe('move');
+	});
+
 	it('이름이 일부만 맞으면 키 방향이 맞을 때만 정한다', () => {
 		const e = effects(sampleScreen());
 		// "필터 메뉴" ↔ "Filter Option 메뉴": 이름 0.4 + 방향(오른쪽) 0.2

@@ -71,6 +71,11 @@ export interface KeyMapOptions {
 	 * 문장이 방향으로 대상을 가리키므로 키 방향에서 가장 가까운 콜아웃이 대상이다 (추정이 아님)
 	 */
 	areaWords: string[];
+	/**
+	 * 이름 없이 "첫 번째 콘텐츠"만 말할 때 ("[▼] 좌측 상단 첫 번째 콘텐츠 포커스"): 항목 낱말 + 이 낱말이면
+	 * 키 방향에서 가장 가까운 콜아웃의 첫 항목이다. 문장에 이름이 있으면(맞는 콜아웃이 없어도) 쓰지 않는다
+	 */
+	firstWords: string[];
 	lastWords: string[];
 	memoryWords: string[];
 	/**
@@ -116,6 +121,7 @@ export const DEFAULT_KEYMAP_OPTIONS: KeyMapOptions = {
 	},
 	itemWords: ['콘텐츠', '항목', '아이템', '카드', '썸네일'],
 	areaWords: ['쉘프', '셸프', '영역', '리스트', '목록', '섹션'],
+	firstWords: ['첫 번째', '첫번째', '첫 '],
 	lastWords: ['마지막'],
 	memoryWords: ['이동한 이력', '이력이 있을'],
 	lastFocusWords: [
@@ -417,8 +423,22 @@ export function parseKeyAction(
 		}
 	}
 
-	// 이름으로 못 정함: 콜아웃이 아닌 요소로 남기고, 키 방향 후보는 따로 붙인다
+	// 이름 없이 "첫 번째 콘텐츠": 키 방향에서 가장 가까운 콜아웃의 첫 항목
 	const nearest = calloutsInDirection(from, key, callouts, options)[0];
+	if (
+		directional &&
+		nearest !== undefined &&
+		tokens.length === 0 &&
+		quoted.length === 0 &&
+		hasAny(main, options.itemWords) &&
+		options.firstWords.some((w) => `${main} `.includes(w))
+	) {
+		return done(
+			{ kind: 'move', to: nearest.no, position: 'first', item: null, memory },
+			`"${main}" = 키 방향 콜아웃 ${nearest.no}번의 첫 항목`
+		);
+	}
+	// 이름으로 못 정함: 콜아웃이 아닌 요소로 남기고, 키 방향 후보는 따로 붙인다
 	const estimate = nearest === undefined ? null : { to: nearest.no, reason: `키 방향에서 가장 가까운 콜아웃` };
 	const name = quoted[0] ?? phrase;
 	if (name === '') return { ...done({ kind: 'unknown' }, '대상 이름 없음'), estimate };

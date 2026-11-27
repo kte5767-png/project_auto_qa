@@ -997,6 +997,11 @@ class Runner {
 		);
 	}
 
+	/** 다른 화면의 요소로 지금 화면을 한 번 본다 (그 화면 콜아웃에 포커스가 있는지 — 화면 전환 판정용) */
+	async observeAs(screen: string): Promise<Observation> {
+		return this.newSession(screen).observe();
+	}
+
 	private newSession(screen: string): Session {
 		const { ctx } = this;
 		if (this.app === null) throw new Error('앱이 열려 있지 않음');
@@ -1597,12 +1602,21 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 						)) ?? (await runner.session.observe()));
 			// 이 화면을 벗어났는가 (프로필에 없는 화면 — 재생·다른 시트의 상세 페이지 — 으로 간 경우)
 			const left = !runner.inScreen(after, screen);
+			// 같은 패널 안에서 바뀌는 화면(4.6 결과 없음 → 4.5 결과)은 패널이 그대로 보여 "새로 나타남"으로 알 수 없다.
+			// 이 화면이 사라졌고, 보이는 다른 화면의 콜아웃에 포커스가 있으면 그 화면으로 간 것으로 본다
+			// (그 화면 요소는 이 화면 관찰에 없으므로 그 화면 요소로 한 번 더 본다)
+			const arrived = new Set<string>();
+			if (runner.shown(before, screen) && !runner.shown(after, screen)) {
+				for (const sc of Object.keys(ctx.profile.screens)) {
+					if (sc === screen || (target(after, ctx.registry.detect(sc))?.visible ?? 0) === 0) continue;
+					if (runner.inScreen(await runner.observeAs(sc), sc)) arrived.add(sc);
+				}
+			}
 			const newlyShown = (sc: string): boolean => {
 				const a = target(after, ctx.registry.detect(sc));
 				const b = target(before, ctx.registry.detect(sc));
-				return (
-					(a?.visible ?? 0) > 0 && ((b?.visible ?? 0) === 0 || (a?.hasFocus === true && b?.hasFocus !== true))
-				);
+				if ((a?.visible ?? 0) === 0) return false;
+				return (b?.visible ?? 0) === 0 || (a?.hasFocus === true && b?.hasFocus !== true) || arrived.has(sc);
 			};
 			const changedTo = Object.keys(ctx.profile.screens).filter((sc) => sc !== screen && newlyShown(sc));
 			for (const { clause, check, after: kind } of okChecks) {

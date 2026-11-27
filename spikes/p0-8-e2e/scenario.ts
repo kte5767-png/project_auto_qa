@@ -90,7 +90,7 @@ export const DEFAULT_TIMING: Timing = {
 	maxRevealKeys: 30,
 	maxResetKeys: 12,
 	toastWaitMs: 4000,
-	transitionWaitMs: 5000,
+	transitionWaitMs: 8000,
 	motionWaitMs: 2000,
 	motionMarginMs: 800,
 	motionGapMs: 700,
