@@ -77,6 +77,8 @@ export interface Layout {
 		fieldHeight: number;
 		/** 칸을 넘치는 카드 제목: 포커스 2초 뒤 흐르는 글자(Marquee). D13은 끔 */
 		cardMarquee: boolean;
+		/** 넘치는 입력값의 끝 처리 (text-overflow). D14는 clip(말줄임 없음) */
+		inputOverflow: 'ellipsis' | 'clip';
 	};
 }
 
@@ -148,7 +150,8 @@ export const BASE_LAYOUT: Layout = {
 		fieldTop: 42,
 		fieldWidth: 953,
 		fieldHeight: 72,
-		cardMarquee: true
+		cardMarquee: true,
+		inputOverflow: 'ellipsis'
 	}
 };
 
@@ -166,6 +169,7 @@ export function getLayout(defects: ReadonlySet<string>): Layout {
 	}
 	if (defects.has('D12')) layout.search.placeholder = 'Search destination or interest';
 	if (defects.has('D13')) layout.search.cardMarquee = false;
+	if (defects.has('D14')) layout.search.inputOverflow = 'clip';
 	return layout;
 }
 

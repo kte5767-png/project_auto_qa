@@ -33,3 +33,5 @@ export {
 } from './fingerprint';
 export type { MotionSample } from './motion';
 export { compareMotion, motionScript, sampleMotion } from './motion';
+export type { FieldView } from './field';
+export { fieldOverflows, fieldScript, fieldShowsEnd, readField } from './field';

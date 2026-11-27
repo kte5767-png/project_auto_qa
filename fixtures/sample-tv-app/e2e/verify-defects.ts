@@ -136,6 +136,7 @@ async function observe(page: Page, mode: Mode, target: string): Promise<Observat
 					fontSize: cs.fontSize,
 					color: cs.color,
 					background: cs.backgroundColor,
+					textOverflow: cs.textOverflow,
 					text: t.textContent,
 					placeholder: t.getAttribute('placeholder'),
 					navigable: t.hasAttribute('data-sample-nav'),

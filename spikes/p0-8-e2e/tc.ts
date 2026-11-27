@@ -18,11 +18,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
-import type { RemoteKey } from '@auto-qa/core';
+import { TextInputError, textFieldScript } from '@auto-qa/core';
+import type { RemoteKey, TextFieldState } from '@auto-qa/core';
 import {
 	addedItems,
 	compareMotion,
+	fieldOverflows,
+	fieldShowsEnd,
 	nextResetStep,
+	readField,
 	sameFingerprint,
 	sampleMotion,
 	takeFingerprint
@@ -228,6 +232,173 @@ function listNextKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 입력란 조건 (judge input: max·trim·ellipsis·tail·head). 목표 입력란에 글자를 넣고 입력란 모양을 본다.
+ * 입력 중 조건(max·tail·ellipsis)을 먼저 보고, 확정(검색)이 필요한 조건(trim·head)은 하나씩 다시 가서 넣고 확정한다.
+ * 넣는 글자는 입력란에 이미 있는 글자(진입 경로가 넣은 검색어)를 늘려 쓰고, 없으면 "a"
+ */
+async function checkInputs(
+	runner: Runner,
+	screen: string,
+	no: string,
+	items: readonly { clause: Clause; check: Check }[],
+	trail: Trail[]
+): Promise<CheckResult[]> {
+	const { ctx } = runner;
+	const out: CheckResult[] = [];
+	const value = (c: Check): string => String(c.value);
+	/** 넣을 글자의 바탕: 처음 가 봤을 때 입력란에 있던 글자 (진입 경로가 넣은 검색어). 없으면 "a" */
+	let origin: string | null = null;
+	const baseOf = (current: string): string => {
+		if (origin === null) origin = current.trim() === '' ? 'a' : current.trim();
+		return origin;
+	};
+	const typing = items.filter((i) => !['trim', 'head'].includes(value(i.check)));
+	const submits = items.filter((i) => ['trim', 'head'].includes(value(i.check)));
+	/** 목표 입력란에 가서 글자를 받을 수 있게 한다 (안 되면 OK 한 번: 편집 상태·TV 키보드). 이유 또는 지금 값 */
+	const prepare = async (): Promise<{ error: string } | { value: string }> => {
+		const miss = await runner.reach(screen, no, trail);
+		if (miss !== null) return { error: miss.reason };
+		const read = (): Promise<TextFieldState> =>
+			runner.session.driver.evaluate<TextFieldState>(textFieldScript('read'));
+		let st = await read();
+		if (!st.editable) {
+			const r = await runner.session.press('OK');
+			record(trail, { key: 'OK', focus: focusText(r.obs), stable: r.stable }, '    입력 ');
+			st = await read();
+		}
+		return st.editable
+			? { value: st.value }
+			: { error: `입력란에 글자를 넣을 수 없음 (포커스 ${focusText(await runner.session.observe())})` };
+	};
+	const type = async (text: string, submit: boolean): Promise<string | null> => {
+		try {
+			await runner.session.driver.typeText(text, { replace: true, submit });
+			record(
+				trail,
+				{ key: null, focus: `글자 ${text.length}자 넣음${submit ? ' + 확인' : ''}`, stable: true },
+				'    입력 '
+			);
+			if (submit) await runner.session.settle(ctx.timing.readyTimeoutMs);
+			return null;
+		} catch (e) {
+			if (e instanceof TextInputError) return e.message;
+			throw e;
+		}
+	};
+	const longOf = (base: string, min: number): string => {
+		const unit = `${base} `;
+		return unit.repeat(Math.ceil(min / unit.length)).trim();
+	};
+
+	if (typing.length > 0) {
+		ctx.live.phase('입력란 조건 확인 중');
+		const p = await prepare();
+		if ('error' in p) for (const { clause, check } of typing) out.push(res(clause, check, 'needs-review', p.error));
+		else {
+			const base = baseOf(p.value);
+			for (const { clause, check } of typing.filter((i) => value(i.check).startsWith('max:'))) {
+				const n = Number(value(check).slice(4));
+				const error = await type('a'.repeat(n + 10), false);
+				if (error !== null) {
+					out.push(res(clause, check, 'needs-review', error));
+					continue;
+				}
+				const v = await readField(runner.session.driver);
+				const len = v.value.length;
+				out.push(
+					res(
+						clause,
+						check,
+						len <= n ? 'pass' : 'fail',
+						`${n + 10}자를 넣음 → 입력란 ${len}자${v.maxLength === null ? '' : ` (maxlength ${v.maxLength})`}`
+					)
+				);
+			}
+			const shape = typing.filter((i) => ['tail', 'ellipsis'].includes(value(i.check)));
+			if (shape.length > 0) {
+				const error = await type(longOf(base, 120), false);
+				const v = await readField(runner.session.driver);
+				for (const { clause, check } of shape) {
+					if (error !== null) out.push(res(clause, check, 'needs-review', error));
+					else if (!fieldOverflows(v))
+						out.push(res(clause, check, null, '넣은 글자가 칸을 넘치지 않아 확인할 수 없음'));
+					else if (value(check) === 'tail')
+						out.push(
+							res(
+								clause,
+								check,
+								fieldShowsEnd(v) ? 'pass' : 'fail',
+								fieldShowsEnd(v)
+									? '입력 중 넘치는 글자의 끝(최근 글자)이 보임'
+									: `입력 중 끝이 보이지 않음 (scrollLeft ${v.scrollLeft} / 넘친 폭 ${v.scrollWidth - v.clientWidth})`
+							)
+						);
+					else
+						out.push(
+							res(
+								clause,
+								check,
+								v.textOverflow === 'ellipsis' ? 'pass' : 'fail',
+								v.textOverflow === 'ellipsis'
+									? '넘치는 입력값에 말줄임(text-overflow: ellipsis)'
+									: `넘치는 입력값에 말줄임이 아님 (text-overflow: ${v.textOverflow})`
+							)
+						);
+				}
+			}
+		}
+	}
+
+	for (const { clause, check } of submits) {
+		ctx.live.phase('입력 → 확정 결과 확인 중');
+		const p = await prepare();
+		if ('error' in p) {
+			out.push(res(clause, check, 'needs-review', p.error));
+			continue;
+		}
+		const base = baseOf(p.value);
+		const text = value(check) === 'trim' ? `  ${base}  ` : longOf(base, 120);
+		const error = await type(text, true);
+		if (error !== null) {
+			out.push(res(clause, check, 'needs-review', error));
+			continue;
+		}
+		const v = await readField(runner.session.driver);
+		if (!v.found) {
+			out.push(res(clause, check, 'needs-review', '확정 뒤 화면에서 입력란을 찾지 못함'));
+			continue;
+		}
+		if (value(check) === 'trim') {
+			const ok = v.value === base;
+			out.push(
+				res(
+					clause,
+					check,
+					ok ? 'pass' : v.value !== v.value.trim() ? 'fail' : 'needs-review',
+					ok
+						? `"  ${base}  " 확정 → 입력란 "${v.value}" (앞뒤 공백 제거)`
+						: `"  ${base}  " 확정 → 입력란 "${v.value}"`
+				)
+			);
+		} else if (!fieldOverflows(v)) {
+			out.push(res(clause, check, null, '확정 뒤 입력값이 칸을 넘치지 않아 확인할 수 없음'));
+		} else {
+			out.push(
+				res(
+					clause,
+					check,
+					v.scrollLeft <= 1 ? 'pass' : 'fail',
+					v.scrollLeft <= 1
+						? '확정 뒤 입력값이 처음부터 보임'
+						: `확정 뒤 입력값이 처음부터 보이지 않음 (scrollLeft ${v.scrollLeft})`
+				)
+			);
+		}
+	}
+	return out;
+}
 
 /**
  * 조작 → 결과 (planner parseOperation):
@@ -922,6 +1093,25 @@ function namedScreen(profile: AppProfile, raw: string, current: string): string 
 	return best.length === 1 ? (best[0]?.screen ?? null) : null;
 }
 
+/**
+ * 콜아웃 표시가 없는 단계의 대상: 조작 문장에 이 화면 콜아웃 이름(화면설계서·TC 단계 이름)이 들어 있으면 그 콜아웃.
+ * 가장 긴 이름 하나로 정해질 때만 (여럿이면 null — 추측하지 않음)
+ */
+function calloutFromAction(nav: NavScreen | undefined, action: string | null): string | null {
+	const text = squash(action ?? '');
+	if (nav === undefined || text === '') return null;
+	let best: { no: string; len: number }[] = [];
+	for (const c of nav.callouts) {
+		for (const n of c.names) {
+			const len = squash(n).length;
+			if (len < 2 || !text.includes(squash(n))) continue;
+			if (best.length === 0 || len > (best[0]?.len ?? 0)) best = [{ no: c.no, len }];
+			else if (len === best[0]?.len && !best.some((b) => b.no === c.no)) best.push({ no: c.no, len });
+		}
+	}
+	return best.length === 1 ? (best[0]?.no ?? null) : null;
+}
+
 /** "OTA 콘텐츠는 최대 5개"처럼 콜아웃 전체가 아닌 일부 종류의 개수인지 */
 function subsetSubject(text: string, names: readonly string[], options: KeyMapOptions): string | null {
 	const subject = /^(.+?)\s*(?:은|는)\s*최대\s*\d+\s*개/.exec(text.trim())?.[1]?.trim();
@@ -958,7 +1148,8 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	const { ctx } = runner;
 	const started = Date.now();
 	const screen = c.specRef?.screenId ?? '';
-	const no = s.targetRef?.callout ?? null;
+	// 콜아웃 표시가 없는 단계("Search field에서 검색어 입력 시")는 조작 문장 속 콜아웃 이름으로 정한다
+	const no = s.targetRef?.callout ?? calloutFromAction(ctx.navs.get(screen), s.action);
 	const base: Omit<StepRun, 'status' | 'explanation' | 'basis' | 'results' | 'trail' | 'screenshot' | 'ms'> = {
 		key: `${c.sheet}!${s.row}`,
 		sheet: c.sheet,
@@ -1005,6 +1196,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	const okChecks: OkCheck[] = [];
 	const motionChecks: { clause: Clause; check: Check }[] = [];
 	const opChecks: { clause: Clause; check: Check; op: OperationPlan }[] = [];
+	const inputChecks: { clause: Clause; check: Check }[] = [];
 
 	for (const clause of clauses) {
 		// "선택 시" 묶음의 있는지·포커스 조건은 OK를 누른 뒤의 결과다
@@ -1113,6 +1305,9 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 					break;
 				case 'motion':
 					motionChecks.push({ clause, check });
+					break;
+				case 'input':
+					inputChecks.push({ clause, check });
 					break;
 				case 'key':
 					keyChecks.push({ clause, check });
@@ -1347,6 +1542,8 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 			await checkOperation(runner, screen, no, op, noop === undefined ? null : String(noop), clause, check, trail)
 		);
 	}
+
+	if (inputChecks.length > 0) results.push(...(await checkInputs(runner, screen, no, inputChecks, trail)));
 
 	const v: StepVerdict = aggregateStep(results);
 	return {
@@ -1801,7 +1998,7 @@ async function main(): Promise<void> {
 		try {
 			for (const [c, s] of selected) {
 				const key = `${c.sheet}!${s.row}`;
-				const label = `${key} ${c.specRef?.screenId ?? ''} ${s.targetRef === null ? '' : calloutMark(s.targetRef.callout)} ${s.targetRef?.label ?? ''}`;
+				const label = `${key} ${c.specRef?.screenId ?? ''} ${s.targetRef === null ? `(${s.action ?? ''})` : `${calloutMark(s.targetRef.callout)} ${s.targetRef.label}`}`;
 				console.log(`  ${label}`);
 				const trail: Trail[] = [];
 				live.begin(key, trail);

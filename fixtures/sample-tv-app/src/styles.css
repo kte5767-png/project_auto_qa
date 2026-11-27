@@ -357,6 +357,8 @@ body {
 	color: #fff;
 	font-size: 26px;
 	font-family: inherit;
+	/* 입력값이 칸을 넘치면 오른쪽 끝 말줄임 (화면설계서 4.8). 값은 레이아웃에서(D14는 clip) */
+	text-overflow: ellipsis;
 }
 
 .search-field input::placeholder {

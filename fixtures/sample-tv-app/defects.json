@@ -138,6 +138,16 @@
 			"reproKeys": ["LEFT", "OK", "DOWN", "DOWN", "RIGHT"],
 			"baselineFocus": "search-card-4",
 			"waitMs": 3000
+		},
+		{
+			"id": "D14",
+			"category": "spec",
+			"screen": "search",
+			"target": "search-field",
+			"summary": "검색창 입력값이 칸을 넘쳐도 오른쪽 끝 말줄임이 없음",
+			"expected": "text-overflow: ellipsis",
+			"actual": "text-overflow: clip",
+			"reproKeys": ["LEFT", "OK"]
 		}
 	]
 }

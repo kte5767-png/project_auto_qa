@@ -54,7 +54,8 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(find('플레이스 홀더')?.checks[0]?.value).toBe('Search your place.');
 		expect(kinds(find('Keyword'))).toEqual(['focus:code', 'presence:code']);
 		expect(kinds(find('정책을 따름'))).toEqual(['reference:none']);
-		expect(kinds(find('255자'))).toEqual(['input:none']);
+		expect(kinds(find('255자'))).toEqual(['input:code']);
+		expect(find('255자')?.checks[0]?.value).toBe('max:255');
 		expect(kinds(find('자연스럽게'))).toEqual(['descriptive:ai']);
 		expect(kinds(find('팝업 닫힘'))).toEqual(['behavior:code']);
 	});
@@ -81,6 +82,28 @@ describe('기대 결과를 조건으로 나누기', () => {
 		);
 		expect(kinds(image)).toEqual(['data:none']);
 		expect(kinds(plain)).toEqual(['transition:code']);
+	});
+
+	it('글자 입력 조건 중 입력란 모양으로 볼 수 있는 것은 코드로, 나머지는 확인 불가', () => {
+		const clauses = splitClauses(
+			[
+				'- 최대 입력 가능 글자 수: 255자(공백 포함)',
+				'- 입력값의 선행 및 후행 공백은 자동 제거',
+				'예: 공백 입력 후 입력값 입력 / 입력값 입력 후 공백 입력',
+				'- 입력값이 영역을 벗어날 경우 오른쪽 끝 말줄임 처리',
+				'- 사용자가 검색창에 입력할 때 최근 입력된 글자가 오른쪽에 유지',
+				'- 입력값 검색 후에는 입력값의 처음부터 표시(검색어 시작 부분)',
+				'- 입력값에 따라 자동 완성 키워드 제공'
+			].join('\n')
+		);
+		expect(clauses.map((c) => c.checks.map((k) => `${k.kind}:${k.method}:${String(k.value)}`))).toEqual([
+			['input:code:max:255'],
+			['input:code:trim'],
+			['input:code:ellipsis'],
+			['input:code:tail'],
+			['input:code:head'],
+			['input:none:입력값']
+		]);
 	});
 
 	it('리모컨 전용 버튼·포인터 조작은 따로 구분한다 (그 조작의 결과까지)', () => {
@@ -113,7 +136,7 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(kinds(menu)).toEqual(['presence:code']);
 		expect(kinds(search)).toEqual(['data:none']);
 		expect(kinds(sorted)).toEqual(['data:none']);
-		expect(kinds(typed)).toEqual(['input:none']);
+		expect(kinds(typed)).toEqual(['input:code']);
 		expect(kinds(idx)).toEqual(['data:none']);
 	});
 });

@@ -72,6 +72,11 @@ export interface ClauseOptions {
 	referenceWords: string[];
 	/** 글자 입력이 필요한 조건 */
 	inputWords: string[];
+	/**
+	 * 글자 입력 조건 중 입력란 모양으로 확인할 수 있는 것 (정규식 원문 → 확인 종류). value가 "max"면 첫 괄호가 글자 수.
+	 * max: 글자 수 상한 / trim: 앞뒤 공백 제거 / ellipsis: 넘치면 말줄임 / tail: 입력 중 최근 글자가 보임 / head: 검색 뒤 처음부터 표시
+	 */
+	inputRules: { pattern: string; value: 'max' | 'trim' | 'ellipsis' | 'tail' | 'head' }[];
 	/** 리모컨 전용 조작 (방향키·OK·Back 밖의 버튼, 포인터) */
 	remoteWords: string[];
 	/** 항목 종류에 따른 조건 ("이미지 콘텐츠일 경우 …") — 화면에서 항목 종류를 구분하지 않으므로 문장 전체를 확인하지 않는다 */
@@ -127,6 +132,13 @@ export const DEFAULT_CLAUSE_OPTIONS: ClauseOptions = {
 	],
 	referenceWords: ['정책을 따름', '참고', '시나리오 문서'],
 	inputWords: ['입력 가능 글자', '입력값', '공백 입력', '입력할 때'],
+	inputRules: [
+		{ pattern: '최대\\s*입력\\s*가능\\s*글자\\s*수\\s*[:：]?\\s*(\\d+)\\s*자', value: 'max' },
+		{ pattern: '(?:선행|앞).{0,6}(?:후행|뒤).{0,6}공백.{0,6}(?:자동\\s*)?(?:제거|삭제)', value: 'trim' },
+		{ pattern: '입력값이\\s*(?:영역|칸)을?\\s*(?:벗어날|초과할|넘을)\\s*경우.{0,12}말줄임', value: 'ellipsis' },
+		{ pattern: '입력할\\s*때.{0,20}최근\\s*입력된\\s*글자가?\\s*오른쪽에?\\s*유지', value: 'tail' },
+		{ pattern: '검색\\s*후에?는?\\s*입력값의?\\s*처음부터\\s*표시', value: 'head' }
+	],
 	remoteWords: ['More Action', 'MRCU', '포인터', '매직 리모컨', '매직리모컨'],
 	itemTypeWords: ['콘텐츠일 경우', '콘텐츠인 경우', '콘텐츠의 경우', '콘텐츠일 때', '콘텐츠인 때'],
 	presenceSections: ['표시 내용', '표시'],
@@ -221,7 +233,15 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 	if (rule !== undefined) add('data', 'none', rule, `검색·편성 규칙 ("${rule}")`);
 	const input = has(body, options.inputWords);
 	if (input !== undefined) {
-		// 글자 입력이 있어야 확인할 수 있는 조건 — 같은 문장의 다른 조건도 입력이 먼저다
+		// 글자 입력이 있어야 확인할 수 있는 조건 — 같은 문장의 다른 조건도 입력이 먼저다.
+		// 입력란 모양으로 확인할 수 있는 것(글자 수 상한, 공백 제거, 말줄임, 보이는 위치)은 코드로, 나머지는 확인 불가
+		for (const r of options.inputRules) {
+			const m = new RegExp(r.pattern, 'i').exec(body);
+			if (m === null) continue;
+			const value = r.value === 'max' ? `max:${m[1] ?? ''}` : r.value;
+			add('input', 'code', value, `입력란 조건 (${value}) — 글자를 넣고 입력란 모양을 봄`);
+		}
+		if (checks.some((c) => c.kind === 'input')) return checks;
 		add('input', 'none', input, `글자 입력 조작이 필요 ("${input}") — 지금 계획 범위 밖`);
 		return checks;
 	}

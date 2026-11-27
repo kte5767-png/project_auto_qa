@@ -137,6 +137,7 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 				<input
 					ref={inputRef}
 					data-testid="search-field"
+					style={{ textOverflow: search.inputOverflow }}
 					placeholder={search.placeholder}
 					readOnly={!editing}
 					tabIndex={-1}
