@@ -34,6 +34,16 @@ export interface BrowserDriverOptions {
 	suppressMouse?: boolean;
 }
 
+export interface LiveViewOptions {
+	/** 프레임 크기 (앱 화면을 이 크기 안으로 줄여 받는다) */
+	width: number;
+	height: number;
+	/** JPEG 품질 0~100 */
+	quality: number;
+}
+
+export const DEFAULT_LIVE_VIEW_OPTIONS: LiveViewOptions = { width: 960, height: 540, quality: 60 };
+
 const SUPPRESS_MOUSE_SCRIPT = `['mousemove','mouseover','mouseout','mouseenter','mouseleave','mousedown','mouseup','click','wheel'].forEach(function (type) {
 	window.addEventListener(type, function (event) { event.stopImmediatePropagation(); }, true);
 });`;
@@ -113,6 +123,38 @@ export class BrowserDriver implements Driver {
 			options.type === 'jpeg' ? { type: 'jpeg', quality: options.quality ?? 70 } : { type: 'png' }
 		);
 		return new Uint8Array(buffer);
+	}
+
+	/**
+	 * 실시간 화면 (사용자 UI 미리보기용, 판정과 무관): 화면이 다시 그려질 때마다 JPEG 프레임을 받는다.
+	 * 브라우저가 그린 화면을 보내 주는 방식(CDP screencast)이라 앱 DOM을 바꾸지 않는다
+	 * (screenshot은 입력란 커서를 숨기려 DOM을 잠깐 바꾼다) → 안정화 대기·판정에 영향이 없다.
+	 * Playwright의 page.screencast는 창 배율(--force-device-scale-factor)을 바꾸면 프레임이 오지 않아 CDP를 직접 쓴다.
+	 * 돌려준 함수로 멈춘다 (페이지를 닫으면 저절로 멈춘다)
+	 */
+	async liveView(
+		onFrame: (jpeg: Uint8Array) => void,
+		options: Partial<LiveViewOptions> = {}
+	): Promise<() => Promise<void>> {
+		const o = { ...DEFAULT_LIVE_VIEW_OPTIONS, ...options };
+		const session = await this.page.context().newCDPSession(this.page);
+		const handler = (frame: { data: string; sessionId: number }): void => {
+			void session.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => undefined);
+			onFrame(new Uint8Array(Buffer.from(frame.data, 'base64')));
+		};
+		session.on('Page.screencastFrame', handler);
+		await session.send('Page.startScreencast', {
+			format: 'jpeg',
+			quality: o.quality,
+			maxWidth: o.width,
+			maxHeight: o.height
+		});
+		return async () => {
+			session.off('Page.screencastFrame', handler);
+			if (this.page.isClosed()) return;
+			await session.send('Page.stopScreencast').catch(() => undefined);
+			await session.detach().catch(() => undefined);
+		};
 	}
 
 	/** 같은 페이지를 다시 연다 (시작 상태 초기화) */
