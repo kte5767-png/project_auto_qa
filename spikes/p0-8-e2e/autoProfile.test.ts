@@ -9,6 +9,7 @@ import {
 	inputCallout,
 	planAutoEntries,
 	sameView,
+	screenNamesFrom,
 	seedOf,
 	seedQuery,
 	settleDetect
@@ -151,6 +152,15 @@ const linkOf = (screenId: string, selectors: [string, string, number[]][]): AppS
 		alternatives: [],
 		reason: ''
 	}))
+});
+
+describe('화면 이름', () => {
+	it('이동 문장이 부른 이름을 도착 화면 이름에 더한다 (요소 부르기·가족 조건 이동은 빼고)', () => {
+		const names = screenNamesFrom(buildScreenGraph(SCREENS));
+		expect(names.get('9.5')).toEqual(['찾기 완료', '찾기 결과']);
+		expect(names.get('9.6')).toEqual(['찾기 완료 - 찾기 결과 없음']);
+		expect(names.get('9.1')).toEqual(['찾기 - 최초 진입 시(키보드 활성화)']);
+	});
 });
 
 describe('화면 표시·입력란', () => {

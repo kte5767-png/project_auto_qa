@@ -51,6 +51,8 @@ export interface ScreenEdge {
 	typed: boolean;
 	/** 같은 콜아웃의 다른 이동에서 가족 조건으로 끌어낸 이동 */
 	derived: boolean;
+	/** 문장에서 뽑아 대상을 찾은 이름 ("검색 결과 페이지", 부른 요소 "VKB"). 번호로 찾았으면 null */
+	name: string | null;
 	text: string;
 }
 
@@ -263,7 +265,7 @@ function calledName(text: string, options: ScreenGraphOptions): string | null {
 }
 
 type Target =
-	| { ok: true; to: string; how: ScreenEdge['how']; derived: { to: string; condition: string }[] }
+	| { ok: true; to: string; how: ScreenEdge['how']; name: string; derived: { to: string; condition: string }[] }
 	| { ok: false; reason: string; name: string | null; candidates: { id: string; score: number }[]; stays?: true };
 
 /**
@@ -320,7 +322,7 @@ function resolveTarget(
 			const fam = familyOf(first.id);
 			if (fam.some((x) => x.screenId === second.id)) {
 				const pick = pickInFamily(fam, want, options);
-				if (pick !== null && pick.to !== from.screenId) return { ok: true, how: 'name', ...pick };
+				if (pick !== null && pick.to !== from.screenId) return { ok: true, how: 'name', name, ...pick };
 			}
 			return {
 				ok: false,
@@ -336,7 +338,7 @@ function resolveTarget(
 		if (to === from.screenId) {
 			return { ok: false, reason: `"${name}"은 이 화면 (화면 전환 아님)`, name, candidates: [], stays: true };
 		}
-		return { ok: true, to, how: 'name', derived: pick?.derived ?? [] };
+		return { ok: true, to, how: 'name', name, derived: pick?.derived ?? [] };
 	}
 	// 제목과 다른 말: 이름 낱말이 바탕 낱말과 겹치는 비율로 가족을 고른다 (한 가족만 겹칠 때)
 	const nameWords = wordsOf(name);
@@ -367,7 +369,7 @@ function resolveTarget(
 	if (pick === null || pick.to === from.screenId) {
 		return { ok: false, reason: `"${name}" 가족 안에서 화면을 정할 수 없음`, ...diag };
 	}
-	return { ok: true, how: 'family', ...pick };
+	return { ok: true, how: 'family', name, ...pick };
 }
 
 /** "VKB 호출": 부른 요소 이름(줄임말 포함)이 제목에 든 화면 (닫힘 상태 제외). 이 화면이면 이동이 아님 */
@@ -396,7 +398,9 @@ function resolveCalled(
 			stays: true
 		};
 	}
-	if (hits.length === 1) return { ok: true, to: (hits[0] as GraphScreen).screenId, how: 'element', derived: [] };
+	if (hits.length === 1) {
+		return { ok: true, to: (hits[0] as GraphScreen).screenId, how: 'element', name: called, derived: [] };
+	}
 	return {
 		ok: false,
 		reason: hits.length === 0 ? '이동할 화면 이름을 찾지 못함' : '부른 요소가 든 화면을 하나로 정할 수 없음',
@@ -472,7 +476,7 @@ export function buildScreenGraph(
 					const edge = { ...base, action, typed, derived: false };
 					const byNumber = numberedScreens(text, known).filter((id) => id !== s.screenId);
 					if (byNumber.length === 1) {
-						edges.push({ ...edge, to: byNumber[0] ?? '', condition, how: 'number' });
+						edges.push({ ...edge, to: byNumber[0] ?? '', condition, how: 'number', name: null });
 						continue;
 					}
 					const target = resolveTarget(text, s, screens, condition, options);
@@ -485,11 +489,18 @@ export function buildScreenGraph(
 						});
 						continue;
 					}
-					edges.push({ ...edge, to: target.to, condition, how: target.how });
+					edges.push({ ...edge, to: target.to, condition, how: target.how, name: target.name });
 					for (const d of target.derived) {
 						if (d.to === s.screenId) continue;
 						if (edges.some((e) => e.from === s.screenId && e.callout === c.no && e.to === d.to)) continue;
-						edges.push({ ...edge, to: d.to, condition: d.condition, how: target.how, derived: true });
+						edges.push({
+							...edge,
+							to: d.to,
+							condition: d.condition,
+							how: target.how,
+							name: target.name,
+							derived: true
+						});
 					}
 				}
 			}

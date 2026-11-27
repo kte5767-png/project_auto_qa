@@ -218,15 +218,39 @@ export function settleDetect(
 		: { detect: at.given, note: '주어진 프로필 표시' };
 }
 
+/**
+ * 화면 이름: 화면설계서 제목, 그리고 다른 화면의 "~로 이동" 문장이 이 화면을 부른 이름 ("검색 결과 페이지").
+ * TC 문장도 같은 이름으로 부르므로 판정에서 도착 화면을 찾는 데 쓴다. 번호로 찾은 이동, 가족 조건으로 끌어낸 이동,
+ * 요소 부르기("VKB 호출" — 화면 이름이 아님)는 빼고, 두 화면 이상을 부른 이름도 뺀다
+ */
+export function screenNamesFrom(graph: ScreenGraph): Map<string, string[]> {
+	const targets = new Map<string, Set<string>>();
+	for (const e of graph.edges) {
+		if (e.derived || e.name === null || (e.how !== 'name' && e.how !== 'family')) continue;
+		const set = targets.get(e.name) ?? new Set<string>();
+		set.add(e.to);
+		targets.set(e.name, set);
+	}
+	const out = new Map<string, string[]>();
+	for (const s of graph.screens) {
+		const names = s.title === null ? [] : [s.title];
+		for (const [name, to] of targets) {
+			if (to.size === 1 && to.has(s.id) && !names.includes(name)) names.push(name);
+		}
+		out.set(s.id, names);
+	}
+	return out;
+}
+
 /** 자동 프로필 화면 하나 */
 export function autoScreen(
 	item: AutoPlanItem,
 	detect: string,
 	link: AppScreenLink | undefined,
-	title: string | null
+	names: readonly string[]
 ): ScreenDef {
 	return {
-		...(title === null ? {} : { names: [title] }),
+		...(names.length === 0 ? {} : { names: [...names] }),
 		detect,
 		...(item.from === null ? {} : { from: item.from }),
 		entry: item.entry,

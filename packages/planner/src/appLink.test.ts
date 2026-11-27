@@ -453,6 +453,22 @@ describe('Enact 목록 꼴 (스크롤 칸·항목 칸으로 여러 번 감쌈)',
 			items: '.ContentCard_card'
 		});
 	});
+
+	it('목업 상자가 첫 카드 썸네일만 덮어도 이름이 목록이면 결과 묶음까지 넓힌다', () => {
+		const link = linkOne(callout('3', '검색 결과 리스트', [], r(188, 348, 364, 204)));
+		expect(link?.best?.node).toBe(9);
+	});
+
+	it('썸네일이 카드 안 깊이 있어도 (카드 > 몸통 > 그림 칸 > 썸네일) 이름이 목록이면 결과 묶음까지', () => {
+		const deep = snap([
+			...PAGE.nodes.slice(0, 19),
+			{ parent: 15, classes: ['ContentCard_body'], rect: r(180, 340, 380, 300) },
+			{ parent: 19, classes: ['ContentCard_imageWrap'], rect: r(190, 350, 360, 200) },
+			{ parent: 20, classes: ['ContentCard_thumbnail'], rect: r(190, 350, 360, 200) }
+		]);
+		const c = callout('3', '검색 결과 리스트', [], r(188, 348, 364, 204));
+		expect(linkScreenToApp({ ...NAV, callouts: [c] }, deep).callouts[0]?.best?.node).toBe(9);
+	});
 });
 
 describe('항목이 하나뿐인 포커스 묶음, 데이터가 든 이름', () => {

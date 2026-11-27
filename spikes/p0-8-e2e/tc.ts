@@ -140,6 +140,7 @@ import {
 	planAutoEntries,
 	sameView,
 	seedOf,
+	screenNamesFrom,
 	seedQuery,
 	settleDetect
 } from './autoProfile';
@@ -2654,7 +2655,7 @@ async function autoMain(
 	);
 	const graphScreens = await loadGraphScreens(specFiles);
 	const graph = buildScreenGraph(graphScreens);
-	const titles = new Map(graphScreens.map((g) => [g.screenId, g.title]));
+	const names = screenNamesFrom(graph);
 	const plan = planAutoEntries(graph, profile);
 	const query = seedQuery(profile);
 	const auto = seedOf(profile);
@@ -2740,7 +2741,7 @@ async function autoMain(
 			const from = source === 'seed' && item.source === 'auto' ? given?.from : (item.from ?? undefined);
 			const detect = item.from === null ? (given?.detect ?? PENDING_DETECT) : PENDING_DETECT;
 			use(screen, {
-				...(titles.get(screen) == null ? {} : { names: [titles.get(screen) as string] }),
+				...((names.get(screen) ?? []).length === 0 ? {} : { names: names.get(screen) }),
 				detect,
 				...(from === undefined ? {} : { from }),
 				entry: [],
@@ -2774,7 +2775,7 @@ async function autoMain(
 			rows.push(...graded);
 			links.set(screen, link);
 			snaps.set(screen, snap);
-			use(screen, autoScreen({ ...item, entry, from: from ?? null }, detect, link, titles.get(screen) ?? null));
+			use(screen, autoScreen({ ...item, entry, from: from ?? null }, detect, link, names.get(screen) ?? []));
 			(auto.screens[screen] as ScreenDef).entry = known(screen, entry);
 			done.push({ item: { ...item, entry, from: from ?? null }, source, note });
 			await writeFile(join(out, 'snapshots', `${screen}.json`), `${JSON.stringify(snap)}\n`);
