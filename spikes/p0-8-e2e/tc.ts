@@ -7,7 +7,7 @@
  *   pnpm spike:tc-run --score out/<시각>/result.json --truth <QA 결과.xlsx>
  *   pnpm spike:tc-run --link --profile <앱 프로필.json> --spec <화면설계서 폴더>   (콜아웃 ↔ 앱 요소 자동 연결 채점, D-043 ③)
  *   pnpm spike:tc-run --graph --profile <앱 프로필.json> --spec <화면설계서 폴더>  (화면 이동 지도 채점, 앱을 열지 않음, D-043 ④)
- *   pnpm spike:tc-run --auto --profile <씨앗 프로필.json> --spec <화면설계서 폴더>   (자동 프로필 만들기, D-043 ③④)
+ *   pnpm spike:tc-run [TC.xlsx] --auto --profile <씨앗 프로필.json> --spec <화면설계서 폴더>   (자동 프로필 만들기, D-043 ③④)
  *
  * 한 단계 = 화면설계서 콜아웃 하나의 사양(표시 내용·개수·키 동작·선택 시).
  *   1. 그 화면까지 간다 (앱 프로필의 진입 경로). 같은 화면의 단계들은 앱을 한 번만 연다 (D-038)
@@ -2877,7 +2877,18 @@ async function main(): Promise<void> {
 	}
 	if (values.auto) {
 		if (specNavs === null) throw new Error('--auto에는 --spec(화면설계서 폴더)이 필요합니다');
-		await autoMain(profile, registry, specNavs, specFiles, options);
+		// TC 파일을 함께 주면 TC 단계의 콜아웃 이름("(3) 검색 결과 리스트")도 연결 근거로 쓴다 (프로필 이름은 쓰지 않음)
+		const named = new Map(specNavs);
+		if (tcFile !== undefined) {
+			const grid = await readWorkbook(resolve(cwd, tcFile));
+			const cases = normalize(grid, suggestProfile(grid)).cases;
+			const noProfile: AppProfile = { ...profile, screens: {} };
+			for (const [screen, names] of calloutNameTable(noProfile, cases)) {
+				const nav = specNavs.get(screen);
+				if (nav !== undefined) named.set(screen, withCalloutNames(nav, screen, names));
+			}
+		}
+		await autoMain(profile, registry, named, specFiles, options);
 		return;
 	}
 	if (values.link) {

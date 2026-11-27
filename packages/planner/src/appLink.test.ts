@@ -454,3 +454,57 @@ describe('Enact 목록 꼴 (스크롤 칸·항목 칸으로 여러 번 감쌈)',
 		});
 	});
 });
+
+describe('항목이 하나뿐인 포커스 묶음, 데이터가 든 이름', () => {
+	/** 0 body, 1 패널, 2 최근 검색어 묶음(spotlight container, 포커스 가능으로 읽힘) > 3 검색어 버튼 하나(이름에 검색어) */
+	const PAGE = snap([
+		{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+		{ parent: 0, rect: r(0, 0, 1920, 1080) },
+		{
+			parent: 1,
+			spotlightId: 'search-recent-searches',
+			container: true,
+			focusable: true,
+			rect: r(0, 198, 1920, 68)
+		},
+		{
+			parent: 2,
+			classes: ['Chip_chip', 'spottable'],
+			spotlightId: 'recent-search-Scenic Temple',
+			ownText: 'Scenic Temple',
+			focusable: true,
+			rect: r(254, 203, 299, 63)
+		}
+	]);
+
+	it('항목이 하나여도 포커스 묶음에서 멈추고 그 안 항목으로 좁히지 않는다', () => {
+		const link = linkScreenToApp(
+			{
+				...NAV,
+				callouts: [callout('1', '최근 검색어', ['최근 검색어 예시'], r(200, 190, 1500, 80), { down: '아래' })]
+			},
+			PAGE
+		).callouts[0];
+		expect(link?.best?.node).toBe(2);
+		expect(link?.selector?.selector).toBe('[data-spotlight-id="search-recent-searches"]');
+	});
+
+	it('항목 글자가 든 이름·띄어쓰기가 든 이름은 안정적이지 않아 다른 조각을 먼저 쓴다', () => {
+		expect(selectorFor(PAGE, [3])).toMatchObject({ selector: '.Chip_chip', stable: true });
+		const only = snap([
+			{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+			{
+				parent: 0,
+				spotlightId: 'recent-search-Scenic Temple',
+				ownText: 'Scenic Temple',
+				focusable: true,
+				rect: r(0, 0, 300, 60)
+			}
+		]);
+		expect(selectorFor(only, [1])).toMatchObject({ stable: false });
+		expect(selectorFor(PAGE, [2])).toMatchObject({
+			selector: '[data-spotlight-id="search-recent-searches"]',
+			stable: true
+		});
+	});
+});

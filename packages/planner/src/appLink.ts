@@ -448,7 +448,9 @@ export function focusContainer(snapshot: DomSnapshot, cache: SnapshotCache, node
 	let cur = node;
 	for (;;) {
 		const total = cache.focusables[cur] ?? 0;
-		if (total === 0 || isItem(snapshot.nodes[cur])) return cur;
+		// 포커스 묶음(spotlight container)은 그 자체가 포커스 영역이라 더 내려가지 않는다 (항목이 하나뿐이어도)
+		const n = snapshot.nodes[cur];
+		if (total === 0 || isItem(n) || n?.container === true) return cur;
 		const kids = (cache.children[cur] ?? []).filter((k) => (cache.focusables[k] ?? 0) > 0);
 		const only = kids[0];
 		if (kids.length !== 1 || only === undefined || (cache.focusables[only] ?? 0) !== total) return cur;
@@ -587,19 +589,30 @@ interface Part {
 	stable: boolean;
 }
 
-/** 요소 하나를 가리킬 수 있는 단순 선택자 조각들 (안정적인 것 먼저) */
-function partsOf(n: DomNode, options: AppLinkOptions): Part[] {
+/**
+ * 요소 하나를 가리킬 수 있는 단순 선택자 조각들 (안정적인 것 먼저). 번호가 붙은 이름, 띄어쓰기가 든 이름, 항목에 보이는
+ * 여러 낱말 글자(데이터)를 담은 이름("recent-search-Scenic Temple")은 데이터가 바뀌면 달라지므로 안정적이지 않다.
+ * texts는 항목(목록 한 칸)의 글자만 준다 (묶음 이름에는 고정된 제목 낱말이 들어가는 일이 많다)
+ */
+function partsOf(n: DomNode, options: AppLinkOptions, texts: readonly string[] = []): Part[] {
 	const out: Part[] = [];
+	const squashed = texts
+		.filter((t) => t.trim().split(/\s+/).length >= 2)
+		.map((t) => t.replace(/[\s_-]+/g, '').toLowerCase());
+	const stableName = (v: string): boolean => {
+		const x = v.replace(/[\s_-]+/g, '').toLowerCase();
+		return !options.counterName.test(v) && !/\s/.test(v) && !squashed.some((t) => x.includes(t));
+	};
 	const id = n.id === null ? null : cssName(n.id);
 	if (id !== null) {
-		out.push({ css: `#${id}`, test: (m) => m.id === id, stable: !options.counterName.test(id) });
+		out.push({ css: `#${id}`, test: (m) => m.id === id, stable: stableName(id) });
 	}
 	const sid = n.spotlightId;
 	if (sid !== null) {
 		out.push({
 			css: `[data-spotlight-id="${attrValue(sid)}"]`,
 			test: (m) => m.spotlightId === sid,
-			stable: !options.counterName.test(sid)
+			stable: stableName(sid)
 		});
 	}
 	for (const c of n.classes) {
@@ -683,7 +696,9 @@ export function selectorFor(
 	const n = members[0];
 	if (n === undefined) return null;
 	const set = new Set(members.map((m) => m.i));
-	const parts = partsOf(n, options).filter((p) => members.every((m) => p.test(m)));
+	const parts = partsOf(n, options, isItem(n) ? nodeTexts(snapshot, n.i, 20) : []).filter((p) =>
+		members.every((m) => p.test(m))
+	);
 	const exact = (tests: ((m: DomNode) => boolean)[], under: number | null = null): boolean => {
 		const hit = snapshot.nodes.filter(
 			(m) => tests.every((t) => t(m)) && (under === null || isAncestorNode(snapshot, under, m.i))

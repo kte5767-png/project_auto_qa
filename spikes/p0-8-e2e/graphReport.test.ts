@@ -114,9 +114,9 @@ describe('gradeGraph', () => {
 	});
 
 	it('요약과 리포트 (화면설계서 문장을 뺀 요약)', () => {
-		expect(summarizeGraph(graph, rows)).toMatchObject({ screens: 6, graded: 5, found: 3, match: 2, missing: 1 });
+		expect(summarizeGraph(graph, rows)).toMatchObject({ screens: 6, graded: 5, found: 4, match: 2, missing: 1 });
 		const masked = graphReportText(graph, rows, false).join('\n');
-		expect(masked).toContain('찾음 3/5 (60%)');
+		expect(masked).toContain('찾음 4/5 (80%)');
 		expect(masked).not.toContain('결과 없음 페이지로');
 		expect(masked).not.toContain('"찾기"');
 		expect(graphReportText(graph, rows).join('\n')).toContain('결과 없음 페이지로');

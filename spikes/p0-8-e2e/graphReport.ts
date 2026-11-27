@@ -167,7 +167,7 @@ export interface GraphSummary {
 	screens: number;
 	/** 화면설계서 안에서 오는 화면 (root 제외) */
 	graded: number;
-	/** match + screen-match + reference */
+	/** 앞 화면에서 이 화면으로 가는 길을 찾은 수: match + screen-match + other-callout + reference */
 	found: number;
 	match: number;
 	missing: number;
@@ -181,7 +181,7 @@ export function summarizeGraph(graph: ScreenGraph, rows: readonly GraphRow[]): G
 	return {
 		screens: rows.length,
 		graded: rows.length - count('root') - count('not-in-spec'),
-		found: count('match') + count('screen-match') + count('reference'),
+		found: count('match') + count('screen-match') + count('other-callout') + count('reference'),
 		match: count('match'),
 		missing: count('missing'),
 		edges: graph.edges.length,
