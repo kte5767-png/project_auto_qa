@@ -5,6 +5,7 @@
  * Pass라고 하는지(틀린 Pass)를 잰다. 이 도구는 result.json·TC 파일을 바꾸지 않는다.
  *
  *   pnpm spike:tc-ai out/tc-<시각> [--model gemma4:e4b] [--shadow] [--mutations <틀린 TC>.mutations.json] [--limit N]
+ *   pnpm spike:tc-ai out/tc-<시각> --mutations <…>.mutations.json --only-mutated   # 확인 필요 + 바꾼 조건만 (빠르게)
  *   pnpm spike:tc-ai out/tc-<시각> --fake          # Ollama 없이 흐름만 확인 (가짜 모델: 늘 uncertain)
  *
  * 결과: <실행 폴더>/ai-review.json, ai-review.md
@@ -272,6 +273,7 @@ async function main(): Promise<void> {
 			shadow: { type: 'boolean', default: false },
 			mutations: { type: 'string' },
 			limit: { type: 'string' },
+			'only-mutated': { type: 'boolean', default: false },
 			fake: { type: 'boolean', default: false }
 		}
 	});
@@ -293,6 +295,8 @@ async function main(): Promise<void> {
 				).mutations ?? []);
 	const isMutated = (i: ReviewItem): boolean => mutations.some((m) => m.key === i.key && m.after === i.clause);
 	let items = pickItems(saved.steps ?? [], values.shadow || mutations.length > 0);
+	// 한 번에 수십 초 걸리므로: 확인 필요 조건과 틀린 TC로 바꾼 조건만
+	if (values['only-mutated']) items = items.filter((i) => i.mode === 'review' || isMutated(i));
 	if (values.limit !== undefined) items = items.slice(0, Number(values.limit));
 
 	const fake = values.fake
