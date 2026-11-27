@@ -19,8 +19,15 @@ import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
 import type { RemoteKey } from '@auto-qa/core';
-import { addedItems, nextResetStep, sameFingerprint, takeFingerprint } from '@auto-qa/focus';
-import type { Observation, ScreenFingerprint } from '@auto-qa/focus';
+import {
+	addedItems,
+	compareMotion,
+	nextResetStep,
+	sameFingerprint,
+	sampleMotion,
+	takeFingerprint
+} from '@auto-qa/focus';
+import type { MotionSample, Observation, ObservedTarget, ScreenFingerprint } from '@auto-qa/focus';
 import {
 	VERDICT_LABEL,
 	aggregateStep,
@@ -210,6 +217,86 @@ function listPrevKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 	return next === undefined ? null : (OPPOSITE[next.key] ?? null);
 }
 
+/** 목록 콜아웃 안에서 다음 항목으로 가는 키 (화면설계서·TC의 "다음 항목", 없으면 "이전 항목" 키의 반대) */
+function listNextKey(actions: readonly KeyAction[], no: string): RemoteKey | null {
+	const own = actions.filter((a) => a.from === no && a.effect.kind === 'step');
+	const next = own.find((a) => a.effect.kind === 'step' && a.effect.delta > 0);
+	if (next !== undefined) return KEY_OF[next.key] ?? null;
+	const prev = own.find((a) => a.effect.kind === 'step' && a.effect.delta < 0);
+	return prev === undefined ? null : (OPPOSITE[prev.key] ?? null);
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Marquee (움직임·시간): 넘치는 글자가 있는 항목에 포커스를 두고 기다린 뒤, 넘치는 글자의 위치가 바뀌는지 본다.
+ * - TC "N초 뒤"면 N초(없으면 timing.motionWaitMs) + 여유를 기다린 뒤 간격을 두고 두 번 잰다
+ * - "N초 뒤"인데 포커스 직후부터 움직이면 시작 시각이 맞는지 사람 확인 (시간에 민감해 Fail로 정하지 않음)
+ * - "Marquee 적용되지 않음"(value 'still')은 같은 시간 동안 움직이지 않아야 Pass
+ * 넘치는 글자가 없으면 확인 불가(null). 첫 항목에 없으면 목록 안에서 옆 항목으로 가 보며 찾는다
+ */
+async function checkMotion(
+	runner: Runner,
+	screen: string,
+	no: string,
+	element: string,
+	seen: ObservedTarget | undefined,
+	clause: Clause,
+	check: Check,
+	trail: Trail[]
+): Promise<CheckResult> {
+	const { ctx } = runner;
+	const still = check.value === 'still';
+	if ((seen?.textOverflow.overflowing ?? 0) === 0)
+		return res(clause, check, null, '칸을 넘치는 글자가 없어 Marquee를 확인할 수 없음');
+	const miss = await runner.reach(screen, no, trail);
+	if (miss !== null) return res(clause, check, 'needs-review', miss.reason);
+	ctx.live.phase('Marquee 움직임 확인 중');
+	const sample = (): Promise<MotionSample> => sampleMotion(runner.session.driver, runner.session.focusSelector);
+	const next = listNextKey(ctx.keyMaps?.get(screen) ?? [], no);
+	let first = await sample();
+	let started = Date.now();
+	const budget = Math.min(ctx.timing.motionMaxItems, Math.max(0, (seen?.itemCount ?? 1) - 1));
+	for (let i = 0; first.overflowing === 0 && next !== null && i < budget; i++) {
+		const r = await runner.session.press(next, false);
+		record(trail, { key: next, focus: focusText(r.obs), stable: r.stable }, '    Marquee ');
+		if (target(r.obs, element)?.hasFocus !== true) break;
+		first = await sample();
+		started = Date.now();
+	}
+	if (first.overflowing === 0)
+		return res(clause, check, null, `포커스한 ${element} 항목에 넘치는 글자가 없어 Marquee를 확인할 수 없음`);
+	const { motionWaitMs, motionMarginMs, motionGapMs } = ctx.timing;
+	const waitMs = typeof check.value === 'number' ? check.value * 1000 : motionWaitMs;
+	// 기다리기 전(포커스 직후) 한 번 더: "N초 뒤 시작"인데 이미 움직이는지
+	await sleep(Math.min(motionGapMs, waitMs / 2));
+	const early = await sample();
+	await sleep(Math.max(0, started + waitMs + motionMarginMs - Date.now()));
+	const a = await sample();
+	await sleep(motionGapMs);
+	const b = await sample();
+	if (!b.focused) return res(clause, check, 'needs-review', '기다리는 동안 포커스가 사라짐');
+	const moved = compareMotion(first, a) === 'moved' || compareMotion(a, b) === 'moved';
+	const sec = `${(waitMs / 1000).toFixed(waitMs % 1000 === 0 ? 0 : 1)}초`;
+	const where = `${focusText(await runner.session.observe())}, 넘치는 글자 ${b.overflowing}개`;
+	if (still) {
+		return moved
+			? res(clause, check, 'fail', `Marquee가 없어야 하는데 넘치는 글자가 움직임 (${where})`)
+			: res(clause, check, 'pass', `포커스 ${sec} 넘게 넘치는 글자가 움직이지 않음 (${where})`);
+	}
+	if (!moved)
+		return res(clause, check, 'fail', `포커스 ${sec} 뒤에도 넘치는 글자가 움직이지 않음 — Marquee 없음 (${where})`);
+	if (typeof check.value === 'number' && compareMotion(first, early) === 'moved') {
+		return res(
+			clause,
+			check,
+			'needs-review',
+			`포커스 직후부터 움직임 — ${sec} 뒤에 시작하는지 사람 확인 (${where})`
+		);
+	}
+	return res(clause, check, 'pass', `포커스 ${sec} 뒤 넘치는 글자가 움직임 (${where})`);
+}
+
 /**
  * 이름으로 가리킨 대상을 찾을 요소: 이 화면 요소 + 진입 경로 앞 화면의 콜아웃 중 누르기 전 화면에 보이던 것.
  * 4.3(최근 검색어가 있을 경우)의 "[▼] 추천 검색어 …"는 앞 화면 4.2의 추천 검색어를 가리킨다(Search!31).
@@ -262,6 +349,18 @@ function calloutNameTable(profile: AppProfile, cases: readonly TcCase[]): Map<st
 	for (const [screen, def] of Object.entries(profile.screens))
 		for (const [no, co] of Object.entries(def.callouts)) add(screen, no, [co.name, ...(co.names ?? [])]);
 	return out;
+}
+
+/**
+ * 앱 요소 이름에 그 콜아웃의 이름(화면설계서·TC 단계 이름)을 더한다. TC 문장이 다른 화면의 콜아웃을 이름으로 부를 때
+ * ("[▲] "Option" 버튼" → 4.2 ⑤ "Search Option 메뉴", "최근검색어가 없을 경우" → 4.3 ① "최근 검색어") 그 이름으로 찾는다
+ */
+function addCalloutNames(registry: ElementRegistry, navs: ReadonlyMap<string, NavScreen>): void {
+	for (const def of Object.values(registry.elements)) {
+		const [screen = '', no = ''] = (def.callout ?? '').split('#');
+		const extra = navs.get(screen)?.callouts.find((c) => c.no === no)?.names ?? [];
+		if (extra.length > 0) def.names = [...new Set([...(def.names ?? []), ...extra])];
+	}
 }
 
 /** 화면·콜아웃 번호별 TC 키 동작 문장 ("[▼] …"). 같은 콜아웃이 여러 단계에 있으면 나중 단계 문장 */
@@ -836,6 +935,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	const results: CheckResult[] = [];
 	const keyChecks: { clause: Clause; check: Check }[] = [];
 	const okChecks: OkCheck[] = [];
+	const motionChecks: { clause: Clause; check: Check }[] = [];
 
 	for (const clause of clauses) {
 		// "선택 시" 묶음의 있는지·포커스 조건은 OK를 누른 뒤의 결과다
@@ -926,6 +1026,19 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 				case 'keyboard':
 					results.push(res(clause, check, null, '가상 키보드(VKB)는 TV에서만 확인 (브라우저에는 없음)'));
 					break;
+				case 'remote':
+					results.push(
+						res(
+							clause,
+							check,
+							null,
+							`리모컨 전용 조작("${String(check.value)}")은 TV에서만 확인 (브라우저에는 없음)`
+						)
+					);
+					break;
+				case 'motion':
+					motionChecks.push({ clause, check });
+					break;
 				case 'key':
 					keyChecks.push({ clause, check });
 					break;
@@ -946,6 +1059,9 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 
 	const screenshot = `${c.sheet}-${s.row}.png`;
 	await writeFile(join(outDir, screenshot), await runner.session.driver.screenshot());
+
+	for (const { clause, check } of motionChecks)
+		results.push(await checkMotion(runner, screen, no, element, t, clause, check, trail));
 
 	// 키 동작: 목표 첫 항목에서 키 하나씩. 누른 뒤에는 키로 목표에 돌아온다 (못 돌아오면 그때만 다시 연다)
 	let blocked: string | null = null;
@@ -1512,6 +1628,7 @@ async function main(): Promise<void> {
 			actions = overrideKeyTexts(actions, nav, no, texts, options).actions;
 		keyMaps.set(screen, actions);
 	}
+	addCalloutNames(registry, navs);
 	const only = values.only === undefined ? null : new Set(values.only.split(',').map((x) => x.trim()));
 	const prefix = values.screen;
 	const selected: [TcCase, TcStep][] = [];

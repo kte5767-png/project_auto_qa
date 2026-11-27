@@ -23,8 +23,10 @@ export type CheckKind =
 	| 'presence'
 	/** 말줄임 */
 	| 'ellipsis'
-	/** 움직임·시간 (Marquee, N초 뒤) */
+	/** 움직임·시간 (Marquee, N초 뒤). value: 기다릴 초(없으면 null), 움직이지 않아야 하면 'still' */
 	| 'motion'
+	/** 리모컨 전용 조작 (More Action 버튼, 포인터) — 브라우저 시뮬레이터에는 없다 */
+	| 'remote'
 	/** 화면 전환 */
 	| 'transition'
 	/** 가상 키보드 호출 */
@@ -70,6 +72,8 @@ export interface ClauseOptions {
 	referenceWords: string[];
 	/** 글자 입력이 필요한 조건 */
 	inputWords: string[];
+	/** 리모컨 전용 조작 (방향키·OK·Back 밖의 버튼, 포인터) */
+	remoteWords: string[];
 	/** "표시 내용"처럼 있는지 확인할 묶음 제목 */
 	presenceSections: string[];
 	/** 문장 끝이 이 낱말이면 그 요소가 있는지 확인 */
@@ -121,6 +125,7 @@ export const DEFAULT_CLAUSE_OPTIONS: ClauseOptions = {
 	],
 	referenceWords: ['정책을 따름', '참고', '시나리오 문서'],
 	inputWords: ['입력 가능 글자', '입력값', '공백 입력', '입력할 때'],
+	remoteWords: ['More Action', 'MRCU', '포인터', '매직 리모컨', '매직리모컨'],
 	presenceSections: ['표시 내용', '표시'],
 	presenceEndings: ['제공', '노출', '표시', '제공됨', '노출됨', '표시됨']
 };
@@ -217,6 +222,12 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 		add('input', 'none', input, `글자 입력 조작이 필요 ("${input}") — 지금 계획 범위 밖`);
 		return checks;
 	}
+	const remote = has(body, options.remoteWords);
+	if (remote !== undefined) {
+		// 리모컨 전용 버튼·포인터로 하는 조작 — 그 조작의 결과도 그 리모컨이 있어야 본다
+		add('remote', 'code', remote, `리모컨 전용 조작 ("${remote}")`);
+		return checks;
+	}
 
 	const max =
 		/최대\s*(\d+)\s*개/.exec(body) ??
@@ -225,7 +236,13 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 	if (max !== null) add('count', 'code', Number(max[1]), `개수 ${max[1]}`);
 	if (rule === undefined) {
 		if (/말줄임/.test(body)) add('ellipsis', 'code', null, '말줄임 (DOM 넘침·text-overflow)');
-		if (/marquee|\d+\s*초\s*(뒤|후)/i.test(body)) add('motion', 'code', null, '움직임·시간 (DOM 위치 변화)');
+		if (/marquee|\d+\s*초\s*(뒤|후)/i.test(body)) {
+			const still =
+				/marquee\S*\s*(?:(?:적용|제공|동작)\s*)?(?:되지|하지)\s*않|marquee\S*\s*(?:미적용|없음)/i.test(body);
+			const sec = /(\d+(?:\.\d+)?)\s*초\s*(?:뒤|후)/.exec(body);
+			if (still) add('motion', 'code', 'still', '움직이지 않아야 함 (DOM 위치 변화 없음)');
+			else add('motion', 'code', sec === null ? null : Number(sec[1]), '움직임·시간 (DOM 위치 변화)');
+		}
 		if (
 			/포커스(되어|가|를|된|로)?\s*(제공|위치|이동|유지)|default\s*포커스|커서가?\s*제공|에\s*포커스\s*$/i.test(
 				body
@@ -237,7 +254,8 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 		if (/VKB|키보드/.test(body) && /호출/.test(body))
 			add('keyboard', 'code', null, '가상 키보드 호출 (키보드 상태 이벤트)');
 		if (/선택\s*불가/.test(body)) add('no-action', 'code', null, 'OK를 눌러도 동작 없음');
-		if (/미노출|노출되지\s*않|제공하지\s*않/.test(body)) add('absence', 'code', null, '요소가 없어야 함');
+		const still = checks.some((c) => c.kind === 'motion' && c.value === 'still');
+		if (/미노출|노출되지\s*않|제공하지\s*않/.test(body) && !still) add('absence', 'code', null, '요소가 없어야 함');
 		if (
 			/(선택|누르|누를|변경|버튼을)\S*\s*(시|경우|하면|거나)/.test(body) &&
 			/(닫힘|열림|제공|이동|호출|동작|노출)/.test(body)

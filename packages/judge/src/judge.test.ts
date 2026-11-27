@@ -59,6 +59,34 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(kinds(find('팝업 닫힘'))).toEqual(['behavior:code']);
 	});
 
+	it('Marquee: 기다릴 초를 값으로, "적용되지 않음"은 움직이지 않아야 함', () => {
+		const [after, plain, still, none] = splitClauses(
+			[
+				'- 포커스 시 2초 뒤 Marquee 제공',
+				'- 말줄임된 키워드 포커스시 marquee 처리',
+				'- Marquee 적용되지 않음',
+				'- Marquee 제공하지 않음'
+			].join('\n')
+		);
+		expect(after?.checks.find((c) => c.kind === 'motion')?.value).toBe(2);
+		expect(plain?.checks.find((c) => c.kind === 'motion')?.value).toBeNull();
+		expect(kinds(still)).toEqual(['motion:code']);
+		expect(still?.checks[0]?.value).toBe('still');
+		expect(kinds(none)).toEqual(['motion:code']);
+	});
+
+	it('리모컨 전용 버튼·포인터 조작은 따로 구분한다 (그 조작의 결과까지)', () => {
+		const [more, pointer] = splitClauses(
+			[
+				'- 리모컨 More Action 버튼 선택 시에도 동일하게 동작',
+				'- MRCU 포인터로 팝업 외 영역 선택 시 팝업 닫힘'
+			].join('\n')
+		);
+		expect(kinds(more)).toEqual(['remote:code']);
+		expect(more?.checks[0]?.value).toBe('More Action');
+		expect(kinds(pointer)).toEqual(['remote:code']);
+	});
+
 	it('"페이지 진입 시"는 화면 전환이 아니라 진입했을 때의 조건이다', () => {
 		const [c] = splitClauses('- Search 페이지 진입 시 VKB 호출하며, Search field에 커서가 제공됨');
 		expect(kinds(c)).toEqual(['focus:code', 'keyboard:code']);

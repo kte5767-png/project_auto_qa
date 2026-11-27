@@ -4,6 +4,7 @@ import {
 	TextInputError,
 	UnsupportedKeyError,
 	WEBOS_KEY_MAP,
+	keyboardEnterEvents,
 	textChangeScript,
 	textFieldScript,
 	textNotApplied
@@ -87,7 +88,8 @@ export class BrowserDriver implements Driver {
 
 	/**
 	 * 글자 입력: 플랫폼 키보드 대신 입력 이벤트(CDP `Input.insertText`)로 넣는다 — 키 이벤트를 만들지 않으므로
-	 * 앱의 키 처리(공간 탐색 등)를 건드리지 않는다. 확인은 리모컨 OK(Enter)로 보낸다.
+	 * 앱의 키 처리(공간 탐색 등)를 건드리지 않는다. 확인은 키보드의 Enter(글자 "\r"가 붙은 키, keypress가 생김)로
+	 * 보낸다 — TV 키보드 서비스의 확인(sendEnterKey)과 같은 역할. 리모컨 OK(글자 없는 키)로는 검색을 확정하지 않는 앱이 있다.
 	 */
 	async typeText(text: string, options: Partial<TypeTextOptions> = {}): Promise<TypeTextResult> {
 		const o = { ...DEFAULT_TYPE_TEXT_OPTIONS, ...options };
@@ -106,7 +108,7 @@ export class BrowserDriver implements Driver {
 		if (textNotApplied(before.value, after, text, o.replace)) {
 			throw new TextInputError(this.kind, '넣은 글자가 입력란에 반영되지 않음');
 		}
-		if (o.submit) await this.pressKey('OK');
+		if (o.submit) for (const event of keyboardEnterEvents()) await this.cdp.send('Input.dispatchKeyEvent', event);
 		return { value: after.value };
 	}
 

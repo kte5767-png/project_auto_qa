@@ -476,7 +476,10 @@ export function checkSpecMove(
 		if (want === undefined) return result(clause, 'key', null, `${ref.screen} ${no}번 콜아웃에 대응된 요소가 없음`);
 	} else {
 		const name = exp.target.kind === 'element' ? exp.target.name : exp.target.to;
-		const m = matchByName(name, Object.entries(nameScope), ([n, e]) => [n, ...(e.names ?? [])], spec.options);
+		// 이름으로 가리킨 이동 대상은 누르기 전 요소 자신이 아니다 (그 자리에 남는 것은 "동작 없음").
+		// 4.4 팝업 "Search Option"의 "[▲] "Option" 버튼"은 팝업을 연 4.2 ⑤ "Search Option 메뉴"다 (Search!34)
+		const scope = Object.entries(nameScope).filter(([n]) => n !== fromName);
+		const m = matchByName(name, scope, ([n, e]) => [n, ...(e.names ?? [])], spec.options);
 		if (m === null) return result(clause, 'key', null, `"${name}"에 대응된 요소가 없음`);
 		want = m.match;
 	}

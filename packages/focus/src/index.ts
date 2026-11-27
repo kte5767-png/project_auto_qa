@@ -31,3 +31,5 @@ export {
 	addedItems,
 	takeFingerprint
 } from './fingerprint';
+export type { MotionSample } from './motion';
+export { compareMotion, motionScript, sampleMotion } from './motion';

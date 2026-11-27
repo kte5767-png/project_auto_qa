@@ -53,10 +53,14 @@ export const WEBOS_KEY_MAP: KeyMap = {
 };
 
 export interface CdpKeyEvent {
-	type: 'rawKeyDown' | 'keyUp';
+	type: 'rawKeyDown' | 'keyDown' | 'keyUp';
 	windowsVirtualKeyCode: number;
 	nativeVirtualKeyCode: number;
 	key: string;
+	/** 글자가 붙은 키(keyDown)만. 붙으면 keypress·입력란 확인(폼 제출)이 생긴다 */
+	code?: string;
+	text?: string;
+	unmodifiedText?: string;
 }
 
 /** CDP Input.dispatchKeyEvent로 보낼 keydown/keyup 쌍. key와 keyCode를 함께 맞춘다 (설계 7.7). */
@@ -64,6 +68,19 @@ export function cdpKeyEvents(def: KeyDef): [CdpKeyEvent, CdpKeyEvent] {
 	const base = { windowsVirtualKeyCode: def.keyCode, nativeVirtualKeyCode: def.keyCode, key: def.key };
 	return [
 		{ type: 'rawKeyDown', ...base },
+		{ type: 'keyUp', ...base }
+	];
+}
+
+/**
+ * 플랫폼 키보드의 확인(Enter) 키 이벤트 쌍. 리모컨 OK(글자 없는 rawKeyDown)와 달리 글자 "\r"가 붙어
+ * keypress와 입력란 확인(폼 제출)이 생긴다. 검색창처럼 키보드의 확인으로만 검색을 실행하는 앱이 있다.
+ * TV에서는 키보드 서비스의 확인(sendEnterKey)이 이 역할을 한다 — 브라우저 시뮬레이터의 글자 입력 확인에 쓴다
+ */
+export function keyboardEnterEvents(): [CdpKeyEvent, CdpKeyEvent] {
+	const base = { windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, key: 'Enter', code: 'Enter' };
+	return [
+		{ type: 'keyDown', ...base, text: '\r', unmodifiedText: '\r' },
 		{ type: 'keyUp', ...base }
 	];
 }
