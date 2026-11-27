@@ -34,6 +34,7 @@ import {
 	DEFAULT_KEYMAP_OPTIONS,
 	DEFAULT_ROUTE_OPTIONS,
 	buildKeyMap,
+	defaultFocusTarget,
 	nameScore,
 	overrideKeyTexts,
 	planRoute,
@@ -739,6 +740,29 @@ function subsetSubject(text: string, names: readonly string[], options: KeyMapOp
 
 type OkCheck = { clause: Clause; check: Check; after: 'transition' | 'no-action' | 'presence' | 'focus' };
 
+/**
+ * "화면 최상단 Default 포커스 항목"의 기대 요소 (planner defaultFocusTarget). 화면설계서 Default Focus → 맨 위 목록의 첫 항목.
+ * 목록 콜아웃 = 앱 요소 목록에서 항목 선택자(items)가 있는 콜아웃. 정하지 못하면 null (진입 시 포커스로 판정)
+ */
+function defaultFocusOf(
+	ctx: Ctx,
+	screen: string,
+	clauseText: string
+): { element: string; firstItem: boolean; basis: string } | null {
+	const nav = ctx.navs.get(screen);
+	if (nav === undefined) return null;
+	const byNo = new Map<string, string>();
+	const lists = new Set<string>();
+	for (const [name, def] of Object.entries(ctx.registry.scoped(screen))) {
+		const [sc, no] = (def.callout ?? '').split('#');
+		if (sc !== screen || no === undefined || no === '') continue;
+		byNo.set(no, name);
+		if ((def.items ?? '') !== '') lists.add(no);
+	}
+	const dft = defaultFocusTarget(nav, clauseText, nav.defaultFocus ?? null, lists, ctx.options);
+	const element = dft === null ? undefined : byNo.get(dft.no);
+	return dft === null || element === undefined ? null : { element, firstItem: dft.firstItem, basis: dft.basis };
+}
 async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, trail: Trail[]): Promise<StepRun> {
 	const { ctx } = runner;
 	const started = Date.now();
@@ -1017,6 +1041,23 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 								check,
 								'needs-review',
 								`OK 후 포커스 ${focusText(after)} — 어느 요소여야 하는지 정하지 못함`
+							)
+						);
+						continue;
+					}
+					const dft = defaultFocusOf(ctx, screen, clause.text);
+					if (dft !== null) {
+						const t = target(after, dft.element);
+						const ok = t?.hasFocus === true && (!dft.firstItem || t.itemCount <= 1 || t.focusItem === 0);
+						const want = `${dft.element}${dft.firstItem ? '[0]' : ''}`;
+						results.push(
+							res(
+								clause,
+								check,
+								ok ? 'pass' : 'fail',
+								ok
+									? `OK → 기본 포커스 ${want} (${dft.basis})`
+									: `OK 후 포커스가 기본 위치가 아님: 기대 ${want} (${dft.basis}) / 실제 ${focusText(after)}`
 							)
 						);
 						continue;
