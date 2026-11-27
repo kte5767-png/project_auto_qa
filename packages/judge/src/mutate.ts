@@ -114,7 +114,7 @@ export function mutateKeyLine(
 	let op: MutationOp;
 	let body: string;
 	if (none) {
-		const target = targets.map((t) => t.trim()).find((t) => t !== '');
+		const target = targets.map((t) => t.replace(/\s+/g, ' ').trim()).find((t) => t !== '');
 		if (target === undefined) return null;
 		op = 'none-to-move';
 		body = `${target} 포커스`;

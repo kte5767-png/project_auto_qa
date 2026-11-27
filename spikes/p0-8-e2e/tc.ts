@@ -1902,9 +1902,11 @@ interface Detection {
 function detection(steps: readonly StepRun[], mutations: readonly MutationEntryLite[]): Detection {
 	const d: Detection = { total: mutations.length, caught: [], missed: [], undecided: [], lines: [] };
 	d.lines.push('| 단계 | 바꾼 조건 | 결과 | 설명 |', '|---|---|---|---|');
+	// 조건 글자는 연속 공백을 하나로 본다 (TC 콜아웃 이름의 두 칸 공백이 바꾼 문장에 그대로 들어감, Search!58)
+	const norm = (t: string): string => t.replace(/\s+/g, ' ').trim();
 	for (const m of mutations) {
 		const step = steps.find((x) => x.key === m.key);
-		const r = step?.results.find((x) => x.kind === (m.kind ?? 'key') && x.clause === m.after);
+		const r = step?.results.find((x) => x.kind === (m.kind ?? 'key') && norm(x.clause) === norm(m.after));
 		let mark: string;
 		if (r?.verdict === 'fail') {
 			d.caught.push(m.key);

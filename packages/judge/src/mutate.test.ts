@@ -62,6 +62,11 @@ describe('mutateKeyLine', () => {
 		expect(splitClauses(m?.text ?? '').find((c) => c.key === 'down')?.text).toBe('[▼] Back to Top 포커스');
 	});
 
+	it('콜아웃 이름의 연속 공백은 하나로 줄인다 (실행 결과 조건 글자와 맞춰 보도록)', () => {
+		const m = down === undefined ? null : mutateKeyLine(EXPECTED, down, ['가이드  문구']);
+		expect(m?.after).toBe('[▼] 가이드 문구 포커스');
+	});
+
 	it('다른 이름이 없으면 "동작 없음"은 바꾸지 않는다', () => {
 		expect(down === undefined ? 'x' : mutateKeyLine(EXPECTED, down, [])).toBeNull();
 	});
