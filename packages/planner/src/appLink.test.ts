@@ -406,7 +406,8 @@ describe('Enact 목록 꼴 (스크롤 칸·항목 칸으로 여러 번 감쌈)',
 	const PAGE = snap([
 		{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
 		{ parent: 0, rect: r(0, 0, 1920, 1080) },
-		{ parent: 1, spotlightId: 'result-categories', container: true, rect: r(0, 182, 1920, 124) },
+		// Enact 포커스 묶음은 tabindex가 있어 포커스 가능으로 읽힌다
+		{ parent: 1, spotlightId: 'result-categories', container: true, focusable: true, rect: r(0, 182, 1920, 124) },
 		{ parent: 2, classes: ['Scroller_scroller'], rect: r(0, 190, 1920, 100) },
 		{ parent: 3, classes: ['Scroller_content'], rect: r(0, 194, 1920, 80) },
 		{ parent: 4, classes: ['CategoryBar_row'], rect: r(0, 198, 1920, 64) },
@@ -417,7 +418,13 @@ describe('Enact 목록 꼴 (스크롤 칸·항목 칸으로 여러 번 감쌈)',
 			focusable: true,
 			rect: r(180 + k * 220, 198, 200, 64)
 		})),
-		{ parent: 1, spotlightId: 'result-container', container: true, rect: r(0, 198 + 108, 1920, 852 - 108) },
+		{
+			parent: 1,
+			spotlightId: 'result-container',
+			container: true,
+			focusable: true,
+			rect: r(0, 306, 1920, 744)
+		},
 		{ parent: 9, classes: ['VirtualGrid_list'], rect: r(150, 320, 1620, 700) },
 		...[0, 1, 2, 3].map((k) => ({ parent: 10, rect: r(180 + k * 400, 340, 380, 300) })),
 		...[0, 1, 2, 3].map((k) => ({

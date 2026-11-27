@@ -1,6 +1,6 @@
 import { area, iou } from '@auto-qa/core';
 import type { Rect } from '@auto-qa/core';
-import { childrenOf, focusableCount, isAncestorNode, nodeTexts } from '@auto-qa/focus';
+import { childrenOf, isAncestorNode, nodeTexts } from '@auto-qa/focus';
 import type { DomNode, DomSnapshot } from '@auto-qa/focus';
 import { meaningful, normalizeLabel, textSimilarity } from '@auto-qa/spec';
 import type { NavCallout, NavScreen } from './keymap';
@@ -133,6 +133,9 @@ export interface AppScreenLink {
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 /** 두 사각형 사이 거리 (겹치면 0) */
+/** 포커스 항목: 포커스 가능하고 포커스 묶음(spotlight container) 자신이 아닌 요소 */
+export const isItem = (n: DomNode | undefined): boolean => n !== undefined && n.focusable && !n.container;
+
 const screenAreaOf = (snapshot: DomSnapshot): number => snapshot.viewport.width * snapshot.viewport.height;
 
 function gap(a: Rect, b: Rect): number {
@@ -287,7 +290,13 @@ export function snapshotCache(
 	options: AppLinkOptions = DEFAULT_APP_LINK_OPTIONS
 ): SnapshotCache {
 	const children = childrenOf(snapshot);
-	const focusables = focusableCount(snapshot, children);
+	// 포커스 항목 수: 포커스 묶음(spotlight container) 자신은 항목이 아니다 (Enact 묶음은 tabindex가 있어 포커스 가능으로 읽힌다)
+	const focusables = snapshot.nodes.map(() => 0);
+	for (let k = snapshot.nodes.length - 1; k >= 0; k--) {
+		let sum = isItem(snapshot.nodes[k]) ? 1 : 0;
+		for (const c of children[k] ?? []) sum += focusables[c] ?? 0;
+		focusables[k] = sum;
+	}
 	const groups = siblingGroups(snapshot, options, children);
 	const memo = new Map<number, string[]>();
 	return {
@@ -439,7 +448,7 @@ export function focusContainer(snapshot: DomSnapshot, cache: SnapshotCache, node
 	let cur = node;
 	for (;;) {
 		const total = cache.focusables[cur] ?? 0;
-		if (total === 0 || snapshot.nodes[cur]?.focusable === true) return cur;
+		if (total === 0 || isItem(snapshot.nodes[cur])) return cur;
 		const kids = (cache.children[cur] ?? []).filter((k) => (cache.focusables[k] ?? 0) > 0);
 		const only = kids[0];
 		if (kids.length !== 1 || only === undefined || (cache.focusables[only] ?? 0) !== total) return cur;
@@ -485,7 +494,7 @@ function refineCandidate(
 		notes.push('포커스 영역으로 좁힘');
 	}
 	// 포커스 가능 요소들을 담은 요소 → 같은 것만 담은 포커스 묶음(spotlight container·id)이 조금 위에 있으면 그것
-	if (snapshot.nodes[node]?.focusable !== true && (cache.focusables[node] ?? 0) > 0) {
+	if (!isItem(snapshot.nodes[node]) && (cache.focusables[node] ?? 0) > 0) {
 		const up = listContainer(snapshot, cache, node, options);
 		const upRect = snapshot.nodes[up]?.rect;
 		if (up !== node && upRect !== undefined && area(upRect) <= screenAreaOf(snapshot) * options.maxLiftAreaRatio) {
@@ -495,11 +504,11 @@ function refineCandidate(
 	}
 	// 가장 가까운 포커스 가능 요소 (자신 또는 두 단계 위까지)
 	let item = node;
-	for (let k = 0; k < 2 && item >= 0 && snapshot.nodes[item]?.focusable !== true; k++) {
+	for (let k = 0; k < 2 && item >= 0 && !isItem(snapshot.nodes[item]); k++) {
 		item = snapshot.nodes[item]?.parent ?? -1;
 	}
 	const itemNode = snapshot.nodes[item];
-	if (itemNode?.focusable === true && itemNode.parent >= 0 && callout.rect !== null) {
+	if (itemNode !== undefined && isItem(itemNode) && itemNode.parent >= 0 && callout.rect !== null) {
 		const rect = callout.rect;
 		// 같은 항목: 같은 부모 아래 태그·안정 클래스(상태 클래스 제외)가 모두 같은 형제 ("nav-item"만 같은 다른 버튼은 아님)
 		const sig = (n: DomNode): string => `${n.tag}|${stableClasses(n, options).sort().join(' ')}`;
@@ -511,7 +520,7 @@ function refineCandidate(
 		// 항목 칸: 가상 목록은 항목마다 칸(요소)으로 한 번 더 감싼다 → 포커스 가능 요소 하나만 담은 칸이면 칸끼리 형제를 본다
 		const onlyFocusable = (m: number): number | undefined => {
 			if ((cache.focusables[m] ?? 0) !== 1) return undefined;
-			return snapshot.nodes.find((n) => n.focusable && (n.i === m || isAncestorNode(snapshot, m, n.i)))?.i;
+			return snapshot.nodes.find((n) => isItem(n) && (n.i === m || isAncestorNode(snapshot, m, n.i)))?.i;
 		};
 		let unit = item;
 		let group: number[] = [];
@@ -650,7 +659,7 @@ export function itemsSelector(
 	const inside = snapshot.nodes.filter((m) => isAncestorNode(snapshot, node, m.i));
 	const byClass = new Map<string, number>();
 	for (const m of inside) {
-		if (!m.focusable) continue;
+		if (!isItem(m)) continue;
 		for (const c of stableClasses(m, options)) byClass.set(c, (byClass.get(c) ?? 0) + 1);
 	}
 	const usage = (c: string): number => snapshot.nodes.filter((m) => m.classes.includes(c)).length;

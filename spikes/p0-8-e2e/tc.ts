@@ -7,6 +7,7 @@
  *   pnpm spike:tc-run --score out/<시각>/result.json --truth <QA 결과.xlsx>
  *   pnpm spike:tc-run --link --profile <앱 프로필.json> --spec <화면설계서 폴더>   (콜아웃 ↔ 앱 요소 자동 연결 채점, D-043 ③)
  *   pnpm spike:tc-run --graph --profile <앱 프로필.json> --spec <화면설계서 폴더>  (화면 이동 지도 채점, 앱을 열지 않음, D-043 ④)
+ *   pnpm spike:tc-run --auto --profile <씨앗 프로필.json> --spec <화면설계서 폴더>   (자동 프로필 만들기, D-043 ③④)
  *
  * 한 단계 = 화면설계서 콜아웃 하나의 사양(표시 내용·개수·키 동작·선택 시).
  *   1. 그 화면까지 간다 (앱 프로필의 진입 경로). 같은 화면의 단계들은 앱을 한 번만 연다 (D-038)
@@ -34,7 +35,7 @@ import {
 	sampleMotion,
 	takeFingerprint
 } from '@auto-qa/focus';
-import type { MotionSample, Observation, ObservedTarget, ScreenFingerprint } from '@auto-qa/focus';
+import type { DomSnapshot, MotionSample, Observation, ObservedTarget, ScreenFingerprint } from '@auto-qa/focus';
 import {
 	VERDICT_LABEL,
 	aggregateStep,
@@ -128,9 +129,20 @@ import {
 	resetConfig,
 	validateProfile
 } from './profile';
-import type { AppProfile, ElementRegistry } from './profile';
+import type { AppProfile, ElementRegistry, ScreenDef } from './profile';
+import {
+	DEFAULT_AUTO_OPTIONS,
+	autoScreen,
+	chooseDetects,
+	edgeEntry,
+	inputCallout,
+	planAutoEntries,
+	seedOf,
+	seedQuery
+} from './autoProfile';
+import type { AutoPlanItem } from './autoProfile';
 import { DEFAULT_TIMING, parseCalloutRef } from './scenario';
-import type { ElementDef, Timing } from './scenario';
+import type { ElementDef, EntryStep, Timing } from './scenario';
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
@@ -156,6 +168,8 @@ const { values, positionals } = parseArgs({
 		link: { type: 'boolean', default: false },
 		/** TC 실행 대신 화면설계서 화면 이동 지도를 프로필 진입 경로와 비교 (앱을 열지 않음, D-043 ④) */
 		graph: { type: 'boolean', default: false },
+		/** TC 실행 대신 자동 프로필 만들기: 씨앗만 쓰고 이동 지도를 따라 들어가며 콜아웃·진입·표시를 만든다 (D-043 ③④) */
+		auto: { type: 'boolean', default: false },
 		/** 사람이 P/F 열에 결과를 적은 엑셀 (QA 결과 보고서 등, 실행할 TC 파일과 다른 파일) */
 		truth: { type: 'string' },
 		/** 일부러 틀린 TC의 바꾼 목록 (mutate.ts가 만든 <TC>.mutations.json) — 바꾼 조건을 Fail로 잡았는지 잰다 */
@@ -2600,6 +2614,225 @@ async function linkMain(
 	console.log(`→ ${join(out, 'link-report.md')}`);
 }
 
+/**
+ * 자동 프로필 만들기 (D-043 ③④ "손 매핑 없이"): 주어진 프로필에서 씨앗(앱 주소·첫 화면까지 가는 길·공통 요소·되돌리기·
+ * 테스트 데이터)만 쓰고, 첫 화면부터 화면설계서 이동 지도를 따라 들어가며 화면마다 콜아웃 선택자(자동 연결), 진입 경로(이동 지도),
+ * 화면 표시(화면끼리 비교)를 만든다. 주어진 프로필의 콜아웃 대응은 채점 정답으로만 쓴다.
+ * 결과: out/auto-<시각>/auto-profile.local.json(초안, 사람이 승인), auto-report.md·json, snapshots/
+ */
+async function autoMain(
+	profile: AppProfile,
+	registry: ElementRegistry,
+	specNavs: ReadonlyMap<string, NavScreen>,
+	specFiles: readonly string[],
+	options: KeyMapOptions
+): Promise<void> {
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+	const out = join(resolve(cwd, values.out), `auto-${stamp}`);
+	await mkdir(join(out, 'snapshots'), { recursive: true });
+	const url = values.url ?? profile.url;
+	const startedAt = new Date().toISOString();
+	const live = new LiveReporter(
+		out,
+		() => ({
+			format: PROGRESS_FORMAT,
+			version: 2,
+			tc: '(자동 프로필)',
+			tcPath: '',
+			url,
+			startedAt,
+			planned: [],
+			steps: []
+		}),
+		{ ...DEFAULT_LIVE_OPTIONS, frameMs: 0 }
+	);
+	const graphScreens = await loadGraphScreens(specFiles);
+	const graph = buildScreenGraph(graphScreens);
+	const titles = new Map(graphScreens.map((g) => [g.screenId, g.title]));
+	const plan = planAutoEntries(graph, profile);
+	const query = seedQuery(profile);
+	const auto = seedOf(profile);
+	if (query !== null) auto.testData = { ...auto.testData, [DEFAULT_AUTO_OPTIONS.queryKey]: query };
+	const keyMaps = new Map<string, KeyAction[]>();
+	for (const [screen, nav] of specNavs) keyMaps.set(screen, buildKeyMap(nav, options));
+	const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
+	const host = await openHost(url, values.headed, windowScale);
+	const ctx: Ctx = {
+		host,
+		profile: auto,
+		registry: buildRegistry(auto),
+		timing: { ...DEFAULT_TIMING, ...profile.timing },
+		pauseMs,
+		url,
+		keyMaps,
+		specKeyMaps: keyMaps,
+		navs: new Map(specNavs),
+		options,
+		live
+	};
+	const runner = new Runner(ctx);
+	const rows: LinkRow[] = [];
+	const links = new Map<string, AppScreenLink>();
+	const snaps = new Map<string, DomSnapshot>();
+	const done: { item: AutoPlanItem; source: string; note: string }[] = [];
+	const errors: string[] = [];
+	const focusables = runner.reset.fingerprint.focusables;
+	const use = (screen: string, def: ScreenDef): void => {
+		auto.screens[screen] = def;
+		ctx.registry = buildRegistry(auto);
+	};
+	// 씨앗 진입의 "#1이 보일 때까지" 같은 기다림은 그 콜아웃을 아직 잇기 전이면 뺀다 (안정화 대기·화면 표시로 기다린다)
+	const known = (screen: string, steps: readonly EntryStep[]): EntryStep[] =>
+		steps.filter((st) => !('waitFor' in st) || ctx.registry.resolve(screen, st.waitFor) in ctx.registry.elements);
+	try {
+		for (const item of plan) {
+			const { screen } = item;
+			const nav = specNavs.get(screen);
+			const given = profile.screens[screen];
+			if (nav === undefined || nav.callouts.length === 0) {
+				// 화면설계서에 없는 화면(팝업 등)은 만들 근거가 없어 주어진 프로필 그대로 (리포트에 센다)
+				if (given !== undefined) {
+					use(screen, given);
+					done.push({ item, source: 'seed', note: '화면설계서에 없어 주어진 프로필 그대로' });
+				} else errors.push(`${screen}: 화면설계서에 콜아웃이 없음`);
+				continue;
+			}
+			let source: string = item.source;
+			let note = item.note;
+			let entry = item.entry;
+			if (item.source === 'auto' && item.edge !== null && item.from !== null) {
+				const fromLink = links.get(item.from);
+				const fromSnap = snaps.get(item.from);
+				const made =
+					fromLink === undefined || fromSnap === undefined
+						? '앞 화면을 읽지 못함'
+						: edgeEntry(item.edge, {
+								inputCallout: inputCallout(fromLink, fromSnap),
+								hasQuery: query !== null
+							});
+				// focus 단계가 가리키는 앞 화면 콜아웃을 자동 연결이 잇지 못했으면 그 길은 못 쓴다
+				const unlinked =
+					typeof made === 'string'
+						? undefined
+						: made
+								.map((s) => ('focus' in s ? s.focus : null))
+								.find(
+									(f): f is string => f !== null && ctx.registry.callout(...splitRef(f)) === undefined
+								);
+				if (typeof made === 'string' || unlinked !== undefined) {
+					const why =
+						typeof made === 'string' ? made : `앞 화면 콜아웃 ${unlinked ?? ''}을 앱 요소에 잇지 못함`;
+					if (given === undefined) {
+						errors.push(`${screen}: 진입 경로를 만들지 못함 (${why})`);
+						continue;
+					}
+					entry = given.entry;
+					source = 'seed';
+					note = `${why} → 주어진 프로필 진입`;
+				} else entry = made;
+			}
+			const from = source === 'seed' && item.source === 'auto' ? given?.from : (item.from ?? undefined);
+			const detect = item.from === null ? (given?.detect ?? 'body') : 'body';
+			use(screen, {
+				...(titles.get(screen) == null ? {} : { names: [titles.get(screen) as string] }),
+				detect,
+				...(from === undefined ? {} : { from }),
+				entry: [],
+				callouts: {}
+			});
+			(auto.screens[screen] as ScreenDef).entry = known(screen, entry);
+			console.log(`  ${screen} ${nav.title ?? ''} ← ${from ?? '(첫 화면)'} [${source}] ${note}`);
+			const trail: Trail[] = [];
+			const error = await runner.open(screen, trail, true);
+			const driver = runner.app?.driver;
+			if (error !== null || driver === undefined) {
+				errors.push(`${screen}: ${error ?? '앱이 열려 있지 않음'}`);
+				auto.screens = Object.fromEntries(Object.entries(auto.screens).filter(([id]) => id !== screen));
+				ctx.registry = buildRegistry(auto);
+				continue;
+			}
+			const probes = truthProbes(registry, screen);
+			const snap = await takeDomSnapshot(driver, { probes, ...(focusables === undefined ? {} : { focusables }) });
+			if (snap.errors.length > 0) console.log(`    [주의] ${snap.errors.join(' / ')}`);
+			const link = linkScreenToApp(nav, snap);
+			const again = await takeDomSnapshot(driver, { probes: autoProbes(link) });
+			const graded = gradeScreen(screen, link, snap, again, probes);
+			for (const r of graded) {
+				console.log(`    ${calloutMark(r.no)} ${r.name ?? ''} → ${r.grade} ${r.auto?.selector ?? '-'}`);
+			}
+			rows.push(...graded);
+			links.set(screen, link);
+			snaps.set(screen, snap);
+			use(screen, autoScreen({ ...item, entry, from: from ?? null }, detect, link, titles.get(screen) ?? null));
+			(auto.screens[screen] as ScreenDef).entry = known(screen, entry);
+			done.push({ item: { ...item, entry, from: from ?? null }, source, note });
+			await writeFile(join(out, 'snapshots', `${screen}.json`), `${JSON.stringify(snap)}\n`);
+			await writeFile(join(out, 'snapshots', `${screen}.png`), await driver.screenshot());
+		}
+	} finally {
+		await runner.close();
+		await host.close();
+		await live.finish(true);
+	}
+	// 화면 표시: 화면끼리 비교. 첫 화면은 씨앗 표시를 그대로 두고(처음 화면을 알아보는 값) 고른 것은 리포트에만
+	const detects = chooseDetects(snaps, links);
+	const detectRows: string[] = [];
+	for (const [screen, choice] of detects) {
+		const def = auto.screens[screen];
+		if (def === undefined) continue;
+		const root = def.from === undefined;
+		if (!root) {
+			if (choice !== null) def.detect = choice.selector;
+			else if (profile.screens[screen] !== undefined) def.detect = profile.screens[screen].detect;
+		}
+		detectRows.push(
+			`- ${screen}: ${choice === null ? '고르지 못함' : `\`${choice.selector}\` (${choice.reason})`}${root ? ' — 첫 화면은 씨앗 표시를 씀' : choice === null ? ' → 주어진 프로필 표시' : ''}`
+		);
+	}
+	const invalid = validateProfile(auto);
+	const summary = summarize(rows);
+	const counts = {
+		auto: done.filter((d) => d.source === 'auto').length,
+		seed: done.filter((d) => d.source === 'seed').length
+	};
+	const lines = [
+		'# 자동 프로필 (D-043 ③④)',
+		'',
+		`- 화면 ${done.length}개: 진입 경로를 이동 지도로 만든 화면 ${counts.auto}개, 씨앗·주어진 프로필을 쓴 화면 ${counts.seed}개, 못 들어간 화면 ${errors.length}개`,
+		`- 콜아웃 연결 (주어진 프로필 대응과 비교): 일치 ${summary.match}/${summary.graded}, 감쌈·포함 ${summary.related}, 다름 ${summary.wrong}, 못 고름 ${summary.none}`,
+		`- 프로필 형식 검사: ${invalid.length === 0 ? '통과' : `오류 ${invalid.length}개`}`,
+		'',
+		'## 화면별 진입',
+		'',
+		...done.map(
+			(d) =>
+				`- ${d.item.screen} ← ${d.item.from ?? '(첫 화면)'} [${d.source}] ${d.note}: ${JSON.stringify(d.item.entry)}`
+		),
+		'',
+		'## 화면 표시',
+		'',
+		...detectRows,
+		...(invalid.length === 0 ? [] : ['', '## 프로필 형식 오류', '', ...invalid.map((e) => `- ${e}`)]),
+		...(errors.length === 0 ? [] : ['', '## 못 들어간 화면', '', ...errors.map((e) => `- ${e}`)]),
+		'',
+		...linkReportText(rows, [])
+	];
+	console.log(`\n${lines.slice(0, 6).join('\n')}`);
+	await writeFile(join(out, 'auto-profile.local.json'), `${JSON.stringify(auto, null, '\t')}\n`);
+	await writeFile(join(out, 'auto-report.md'), `${lines.join('\n')}\n`);
+	await writeFile(
+		join(out, 'auto-report.json'),
+		`${JSON.stringify({ format: 'auto-qa/auto-report', version: 1, url, counts, summary, done, errors, invalid, detects: [...detects], rows }, null, '\t')}\n`
+	);
+	console.log(`→ ${join(out, 'auto-report.md')}`);
+	console.log(`→ ${join(out, 'auto-profile.local.json')} (TC 실행: --profile 에 이 파일)`);
+}
+
+const splitRef = (ref: string): [string, string] => {
+	const r = parseCalloutRef(ref);
+	return [r?.screen ?? '', r?.no ?? ''];
+};
+
 async function main(): Promise<void> {
 	if (values.score !== undefined) {
 		if (values.truth === undefined && values.mutations === undefined) {
@@ -2625,7 +2858,7 @@ async function main(): Promise<void> {
 	}
 
 	const tcFile = positionals[0];
-	if ((tcFile === undefined && !values.link && !values.graph) || values.profile === undefined) {
+	if ((tcFile === undefined && !values.link && !values.graph && !values.auto) || values.profile === undefined) {
 		throw new Error('사용법: pnpm spike:tc-run <TC.xlsx> --profile <앱 프로필.json> --spec <화면설계서 폴더>');
 	}
 	const raw = JSON.parse(await readFile(resolve(cwd, values.profile), 'utf8')) as unknown;
@@ -2640,6 +2873,11 @@ async function main(): Promise<void> {
 	if (values.graph) {
 		if (specFiles.length === 0) throw new Error('--graph에는 --spec(화면설계서 폴더)이 필요합니다');
 		await graphMain(profile, registry, specFiles);
+		return;
+	}
+	if (values.auto) {
+		if (specNavs === null) throw new Error('--auto에는 --spec(화면설계서 폴더)이 필요합니다');
+		await autoMain(profile, registry, specNavs, specFiles, options);
 		return;
 	}
 	if (values.link) {

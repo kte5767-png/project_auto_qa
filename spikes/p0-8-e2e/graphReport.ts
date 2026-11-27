@@ -228,7 +228,7 @@ export function graphReportText(graph: ScreenGraph, rows: readonly GraphRow[], w
 	lines.push('', '## 이동 지도', '');
 	for (const e of graph.edges) {
 		lines.push(
-			`- ${e.from}${mark(e.callout)} → ${e.to} (${e.action}, ${e.how}${e.condition === null ? '' : ', 조건 있음'})${quote(e.text)}`
+			`- ${e.from}${mark(e.callout)} → ${e.to} (${e.action}, ${e.how}${e.condition === null ? '' : ', 조건 있음'}${e.typed ? ', 글자 입력' : ''}${e.derived ? ', 가족 조건으로 끌어냄' : ''})${quote(e.text)}`
 		);
 	}
 	for (const r of graph.references) lines.push(`- ${r.from}${mark(r.callout)} ⇢ ${r.to} (참고)${quote(r.text)}`);
