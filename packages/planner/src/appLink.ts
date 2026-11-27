@@ -37,8 +37,13 @@ export interface AppLinkOptions {
 	alternatives: number;
 	/** 형제 묶음·목록 항목으로 볼 최소 개수 */
 	minGroup: number;
-	/** 선택자에 쓰지 않는 상태 클래스 (포커스·선택에 따라 붙었다 떨어짐) */
+	/**
+	 * 선택자·묶음에 쓰지 않는 상태 클래스 (포커스·선택에 따라 붙었다 떨어짐): "selected", "Switch_selected",
+	 * "categoryBtnActive"(낙타 표기 끝), Enact가 붙이는 "spottable-next-down"
+	 */
 	stateClass: RegExp;
+	/** 좁히기(포커스 영역·목록 묶음)를 해 볼 상위 후보 수 */
+	refineTop: number;
 	/** 다시 그릴 때 번호가 바뀌는 이름 (예: container-12) */
 	counterName: RegExp;
 }
@@ -56,7 +61,9 @@ export const DEFAULT_APP_LINK_OPTIONS: AppLinkOptions = {
 	minNearOnly: 0.85,
 	alternatives: 3,
 	minGroup: 2,
-	stateClass: /(^|[_-])(focus(ed)?|selected|active|pressed|hover(ed)?|checked|disabled|on|off)([_-]|$)/i,
+	refineTop: 30,
+	stateClass:
+		/(^|[_-])(focus(ed)?|selected|active|pressed|hover(ed)?|checked|disabled|on|off)([_-]|$)|[a-z](Focus(ed)?|Selected|Active|Pressed|Hover(ed)?|Checked|Disabled)$|^spottable-next-/,
 	counterName: /(^|[-_])\d+$/
 };
 
@@ -74,6 +81,8 @@ export interface AppLinkCandidate {
 	/** 요소 글자 (앞 몇 개) */
 	texts: string[];
 	rect: Rect;
+	/** 점수를 받은 요소에서 좁히거나 넓힌 경우 그 설명 (예: "포커스 영역으로 좁힘") */
+	refined?: string;
 }
 
 export interface AppCalloutLink {
@@ -331,7 +340,18 @@ export function linkCalloutToApp(
 	cache: SnapshotCache = snapshotCache(snapshot, options)
 ): AppCalloutLink {
 	const name = callout.names[0] ?? null;
-	const ranked = rankAppElements(callout, snapshot, options, cache);
+	// 키 동작이 적힌 콜아웃은 포커스를 받는 곳이다 → 안에 포커스 가능한 요소가 없는 후보(제목 글자 등)는 뺀다
+	const wantFocus = hasKeys(callout);
+	const scored = rankAppElements(callout, snapshot, options, cache).filter((c) => !wantFocus || c.focus === 1);
+	// 상위 후보를 포커스 영역·목록 묶음으로 좁히거나 넓힌 뒤, 같은 상자가 된 것은 하나로 (점수 높은 것 먼저)
+	const same = (a: AppLinkCandidate, b: AppLinkCandidate): boolean =>
+		sameCandidateBox(snapshot, a, b, options.sameBoxIou);
+	const ranked: AppLinkCandidate[] = [];
+	for (const c of scored.slice(0, options.refineTop)) {
+		const r = refineCandidate(snapshot, cache, callout, c, scored, options);
+		if (!ranked.some((x) => x.nodes.join() === r.nodes.join())) ranked.push(r);
+	}
+	ranked.push(...scored.slice(options.refineTop));
 	const best = ranked[0];
 	if (best === undefined || best.score < options.minScore) {
 		return {
@@ -345,10 +365,8 @@ export function linkCalloutToApp(
 			reason: `앱 화면에서 맞는 요소를 찾지 못함 (최고 점수 ${best?.score ?? 0})`
 		};
 	}
-	const same = (a: AppLinkCandidate, b: AppLinkCandidate): boolean =>
-		sameCandidateBox(snapshot, a, b, options.sameBoxIou);
-	const group = ranked.filter((x) => same(best, x));
-	const others = ranked.filter((x) => !group.includes(x));
+	const group = [best, ...scored.filter((x) => x.nodes.join() !== best.nodes.join() && same(best, x))];
+	const others = ranked.filter((x) => x !== best && !same(best, x));
 	// 다음 후보는 서로 다른 상자만 (같은 상자를 감싼 요소가 줄줄이 나오지 않게)
 	const alternatives: AppLinkCandidate[] = [];
 	for (const x of others) {
@@ -364,6 +382,7 @@ export function linkCalloutToApp(
 		`글자 ${best.text}`,
 		callout.rect === null ? '위치 없음' : `겹침 ${best.overlap}`,
 		best.focus === null ? null : best.focus > 0 ? '포커스 가능 요소 있음' : '포커스 가능 요소 없음',
+		best.refined ?? null,
 		ambiguous ? `2위와 차이 ${round3(best.score - (second?.score ?? 0))} → 애매함` : null
 	].filter((x): x is string => x !== null);
 	return {
@@ -375,6 +394,82 @@ export function linkCalloutToApp(
 		ambiguous,
 		alternatives,
 		reason: why.join(', ')
+	};
+}
+
+/**
+ * 안에 든 포커스 가능 요소를 모두 담는 가장 작은 자손 (감싸기만 하는 요소를 지나 내려간다).
+ * 요소 자신이 포커스 가능하면 거기서 멈춘다 (그 안은 항목의 부품)
+ */
+export function focusContainer(snapshot: DomSnapshot, cache: SnapshotCache, node: number): number {
+	let cur = node;
+	for (;;) {
+		const total = cache.focusables[cur] ?? 0;
+		if (total === 0 || snapshot.nodes[cur]?.focusable === true) return cur;
+		const kids = (cache.children[cur] ?? []).filter((k) => (cache.focusables[k] ?? 0) > 0);
+		const only = kids[0];
+		if (kids.length !== 1 || only === undefined || (cache.focusables[only] ?? 0) !== total) return cur;
+		cur = only;
+	}
+}
+
+/**
+ * 점수를 받은 요소를 콜아웃이 가리키는 대상으로 좁히거나 넓힌다 (프로필 대응의 관례: 콜아웃 = 포커스 영역 또는 목록 묶음).
+ * 1) 포커스 가능 요소를 담은 요소 → 그것들을 모두 담는 가장 작은 자손 (제목+목록 섹션 → 목록, 헤더 영역 → 버튼)
+ * 2) 목록 항목 하나(또는 그 안 부품) → 콜아웃 위치가 항목 하나보다 항목 줄 전체에 더 맞으면 목록(항목들의 부모)
+ */
+function refineCandidate(
+	snapshot: DomSnapshot,
+	cache: SnapshotCache,
+	callout: NavCallout,
+	c: AppLinkCandidate,
+	scored: readonly AppLinkCandidate[],
+	options: AppLinkOptions
+): AppLinkCandidate {
+	if (c.nodes.length !== 1) return c;
+	let node = c.node;
+	const notes: string[] = [];
+	const inner = focusContainer(snapshot, cache, node);
+	if (inner !== node) {
+		node = inner;
+		notes.push('포커스 영역으로 좁힘');
+	}
+	// 가장 가까운 포커스 가능 요소 (자신 또는 두 단계 위까지)
+	let item = node;
+	for (let k = 0; k < 2 && item >= 0 && snapshot.nodes[item]?.focusable !== true; k++) {
+		item = snapshot.nodes[item]?.parent ?? -1;
+	}
+	const itemNode = snapshot.nodes[item];
+	if (itemNode?.focusable === true && itemNode.parent >= 0 && callout.rect !== null) {
+		const rect = callout.rect;
+		// 같은 항목: 같은 부모 아래 태그·안정 클래스(상태 클래스 제외)가 모두 같은 형제 ("nav-item"만 같은 다른 버튼은 아님)
+		const sig = (n: DomNode): string => `${n.tag}|${stableClasses(n, options).sort().join(' ')}`;
+		const mine = sig(itemNode);
+		const group = (cache.children[itemNode.parent] ?? []).filter((m) => {
+			const n = snapshot.nodes[m];
+			return n !== undefined && stableClasses(n, options).length > 0 && sig(n) === mine;
+		});
+		if (group.length >= options.minGroup) {
+			const rects = group.map((m) => snapshot.nodes[m]?.rect).filter((r): r is Rect => r !== undefined);
+			const whole = iou(rect, unionRect(rects));
+			if (whole >= options.minGeometryIou && whole > iou(rect, itemNode.rect)) {
+				node = itemNode.parent;
+				notes.push(`항목 ${group.length}개의 목록으로 넓힘`);
+			}
+		}
+	}
+	if (node === c.node) return c;
+	const n = snapshot.nodes[node];
+	if (n === undefined) return c;
+	const known = scored.find((x) => x.nodes.length === 1 && x.node === node);
+	return {
+		...(known ?? c),
+		node,
+		nodes: [node],
+		score: c.score,
+		rect: n.rect,
+		texts: known?.texts ?? cache.texts(node).slice(0, 5),
+		refined: notes.join(', ')
 	};
 }
 

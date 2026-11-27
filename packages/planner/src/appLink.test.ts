@@ -249,3 +249,93 @@ describe('감싸는 요소 없이 나란히 놓인 항목 (형제 묶음)', () =
 		expect(link?.selector).toMatchObject({ selector: '.search-chip', count: 3, unique: true });
 	});
 });
+
+describe('콜아웃 = 포커스 영역 (프로필 대응의 관례)', () => {
+	/**
+	 * 0 body, 1 패널, 2 헤더 오른쪽 영역 > 3 옵션 버튼,
+	 * 4 Travel Now 섹션 > 5 제목, 6 가로 목록 > 7~8 카드 > 9 카드 제목,
+	 * 10 카테고리 줄 > 11~13 카테고리 버튼(12가 선택된 것)
+	 */
+	const PAGE = snap([
+		{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+		{ parent: 0, spotlightId: 'panel_search', rect: r(0, 0, 1920, 1080) },
+		{ parent: 1, classes: ['Header_rightArea'], rect: r(1700, 40, 180, 80) },
+		{
+			parent: 2,
+			classes: ['Header_moreBtn', 'spottable'],
+			spotlightId: 'headerMoreBtn',
+			focusable: true,
+			rect: r(1780, 50, 60, 60)
+		},
+		{ parent: 1, id: 'section-travel-now', rect: r(0, 389, 1920, 391) },
+		{ parent: 4, tag: 'h2', classes: ['Headline_headline'], ownText: 'Travel now', rect: r(180, 389, 136, 36) },
+		{ parent: 4, classes: ['HList_list'], spotlightId: 'search-travel-now', rect: r(0, 425, 1920, 355) },
+		{ parent: 6, classes: ['Card_card', 'spottable'], focusable: true, rect: r(180, 449, 403, 307) },
+		{ parent: 6, classes: ['Card_card', 'spottable'], focusable: true, rect: r(603, 449, 403, 307) },
+		{ parent: 7, classes: ['Card_title'], ownText: 'Jeju', rect: r(190, 700, 300, 30) },
+		{
+			parent: 1,
+			classes: ['CategoryBar_bar'],
+			spotlightId: 'search-result-categories',
+			rect: r(180, 150, 900, 60)
+		},
+		{
+			parent: 10,
+			classes: ['CategoryBar_categoryBtn', 'spottable'],
+			ownText: 'All',
+			focusable: true,
+			rect: r(180, 150, 200, 60)
+		},
+		{
+			parent: 10,
+			classes: ['CategoryBar_categoryBtn', 'CategoryBar_categoryBtnActive', 'spottable'],
+			ownText: 'Flights',
+			focusable: true,
+			rect: r(400, 150, 200, 60)
+		},
+		{
+			parent: 10,
+			classes: ['CategoryBar_categoryBtn', 'spottable'],
+			ownText: 'Hotels',
+			focusable: true,
+			rect: r(620, 150, 200, 60)
+		}
+	]);
+	const linkOne = (c: NavCallout): ReturnType<typeof linkScreenToApp>['callouts'][number] | undefined =>
+		linkScreenToApp({ ...NAV, callouts: [c] }, PAGE).callouts[0];
+
+	it('키 동작이 있으면 제목 글자 대신 그 아래 포커스 가능한 목록을 고른다', () => {
+		const link = linkOne(
+			callout('3', 'Travel Now', ['Travel Now'], r(150, 380, 700, 300), { down: '아래로 이동' })
+		);
+		expect(link?.best?.node).toBe(6);
+		expect(link?.selector).toMatchObject({
+			selector: '[data-spotlight-id="search-travel-now"]',
+			items: '.Card_card'
+		});
+		expect(link?.reason).toContain('포커스 영역으로 좁힘');
+	});
+
+	it('버튼 하나를 감싼 영역은 그 버튼으로 좁힌다', () => {
+		const link = linkOne(callout('5', 'Search Option 메뉴', [], r(1690, 45, 200, 70), { left: '검색창으로 이동' }));
+		expect(link?.best?.node).toBe(3);
+		expect(link?.selector?.selector).toBe('[data-spotlight-id="headerMoreBtn"]');
+	});
+
+	it('항목 하나가 글자로 뽑혀도 콜아웃 위치가 항목 줄에 맞으면 목록으로 넓히고, 상태 클래스는 선택자에 쓰지 않는다', () => {
+		const link = linkOne(
+			callout('2', '카테고리 필터 영역', ['Flights'], r(170, 140, 900, 80), { right: '다음 항목' })
+		);
+		expect(link?.best?.node).toBe(10);
+		expect(link?.selector).toMatchObject({
+			selector: '[data-spotlight-id="search-result-categories"]',
+			items: '.CategoryBar_categoryBtn'
+		});
+	});
+
+	it('콜아웃 위치가 항목 하나에 맞으면 넓히지 않는다', () => {
+		const link = linkOne(callout('7', 'Flights 버튼', ['Flights'], r(395, 145, 210, 70), { left: '왼쪽 항목' }));
+		expect(link?.best?.node).toBe(12);
+		expect(link?.selector?.selector).not.toContain('Active');
+	});
+});

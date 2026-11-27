@@ -546,14 +546,20 @@ function consequenceTarget(runner: Runner, subject: string, toggleRef: string): 
 	const screen = (def.callout ?? '').split('#')[0] ?? '';
 	if (ctx.profile.screens[screen] === undefined) return `${element}의 화면 ${screen}이 프로필에 없음`;
 	// 그 화면 진입 경로가 대상이 나타나기를 기다리면(4.3 "최근 검색어가 있을 경우") 없어야 하는 상태에서는 못 들어간다.
-	// 같은 패널로 표시되는 화면 중 대상을 기다리지 않고, 글자 입력·OK가 가장 적은 화면에서 본다
+	// 같은 패널로 표시되는 화면과 진입 경로가 거치는 앞 화면(4.3 ← 4.2: 앞 화면 위에 영역이 더해짐) 중
+	// 대상을 기다리지 않고, 글자 입력·OK가 가장 적은 화면에서 본다
 	const weight = (sc: string): number | null => {
 		const path = entryPath(ctx.profile, ctx.registry, sc);
 		if (path.some((p) => 'waitFor' in p && p.waitFor === element)) return null;
 		return path.reduce((w, p) => w + ('type' in p ? 10 : 'press' in p && p.press === 'OK' ? 1 : 0), 0);
 	};
+	const upstream: string[] = [];
+	for (let sc = ctx.profile.screens[screen]?.from; sc !== undefined && !upstream.includes(sc);) {
+		upstream.push(sc);
+		sc = ctx.profile.screens[sc]?.from;
+	}
 	const views = Object.keys(ctx.profile.screens)
-		.filter((sc) => sc === screen || runner.sameDetect(sc, screen))
+		.filter((sc) => sc === screen || runner.sameDetect(sc, screen) || upstream.includes(sc))
 		.map((sc) => ({ sc, w: weight(sc) }))
 		.filter((v): v is { sc: string; w: number } => v.w !== null)
 		.sort((a, b) => a.w - b.w);
