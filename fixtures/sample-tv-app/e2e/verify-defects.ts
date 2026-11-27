@@ -170,6 +170,12 @@ async function run(
 		await press(session, key);
 		steps.push(`${key}→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`);
 	}
+	if (defect.input !== undefined) {
+		// 편집 중인 입력란에 글자를 넣고 Enter(OK 키 코드 13)로 확정한다 (검색 결과가 있어야 드러나는 결함)
+		await session.page.keyboard.insertText(defect.input);
+		await press(session, 'OK');
+		steps.push(`"${defect.input}"+Enter→${(await observe(session.page, mode, defect.target)).focused ?? '없음'}`);
+	}
 	if (defect.waitMs !== undefined) await session.page.waitForTimeout(defect.waitMs);
 	const observation = await observe(session.page, mode, defect.target);
 	await session.page.close();

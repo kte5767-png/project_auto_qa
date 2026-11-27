@@ -139,6 +139,21 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(kinds(typed)).toEqual(['input:code']);
 		expect(kinds(idx)).toEqual(['data:none']);
 	});
+
+	it('켜고 끄기(On/Off 가능)와 그리드 배치는 따로 구분한다 (조작 → 결과로 두지 않음)', () => {
+		const [toggle, grid, plain] = splitClauses(
+			[
+				'2) 선택 시',
+				'- 저장 On/Off 가능',
+				'- 카테고리가 선택된 경우 그리드(타일) 형태로 리스트 제공',
+				'- 선택 시 팝업 닫힘'
+			].join('\n')
+		);
+		expect(kinds(toggle)).toEqual(['toggle:code']);
+		expect(kinds(grid)).toEqual(['layout:code']);
+		expect(grid?.checks[0]?.value).toBe('grid');
+		expect(kinds(plain)).toEqual(['behavior:code']);
+	});
 });
 
 describe('글자·개수 비교 (문구는 UX 기준, D-036)', () => {

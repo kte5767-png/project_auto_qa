@@ -33,8 +33,12 @@ export type CheckKind =
 	| 'keyboard'
 	/** 선택해도 동작 없음 */
 	| 'no-action'
-	/** 조작 → 결과 (선택 시 닫힘, On/Off 가능, 루프 안 됨) */
+	/** 조작 → 결과 (선택 시 닫힘, 루프 안 됨) */
 	| 'behavior'
+	/** OK로 켜고 끄기 (On/Off 가능) — OK 전후 상태 표시가 바뀌고 다시 OK로 돌아오는지 */
+	| 'toggle'
+	/** 목록 배치 (그리드·타일 형태). value: 'grid' */
+	| 'layout'
 	/** 요소가 없어야 함 (미노출) */
 	| 'absence'
 	/** 글자 입력이 필요한 조건 (지금 계획 범위 밖) */
@@ -79,6 +83,10 @@ export interface ClauseOptions {
 	inputRules: { pattern: string; value: 'max' | 'trim' | 'ellipsis' | 'tail' | 'head' }[];
 	/** 리모컨 전용 조작 (방향키·OK·Back 밖의 버튼, 포인터) */
 	remoteWords: string[];
+	/** OK로 켜고 끄는 조건 (정규식 원문, 대소문자 무시) */
+	togglePatterns: string[];
+	/** 그리드(타일) 배치 조건 (정규식 원문, 대소문자 무시) */
+	gridPatterns: string[];
 	/** 항목 종류에 따른 조건 ("이미지 콘텐츠일 경우 …") — 화면에서 항목 종류를 구분하지 않으므로 문장 전체를 확인하지 않는다 */
 	itemTypeWords: string[];
 	/** "표시 내용"처럼 있는지 확인할 묶음 제목 */
@@ -140,6 +148,12 @@ export const DEFAULT_CLAUSE_OPTIONS: ClauseOptions = {
 		{ pattern: '검색\\s*후에?는?\\s*입력값의?\\s*처음부터\\s*표시', value: 'head' }
 	],
 	remoteWords: ['More Action', 'MRCU', '포인터', '매직 리모컨', '매직리모컨'],
+	togglePatterns: [
+		'on\\s*/\\s*off\\s*(?:가능|전환|변경\\s*가능)',
+		'켜기\\s*/\\s*끄기\\s*가능',
+		'(?:선택|체크)\\s*/\\s*해제\\s*가능'
+	],
+	gridPatterns: ['그리드', '타일\\s*형태', '\\bgrid\\b'],
 	itemTypeWords: ['콘텐츠일 경우', '콘텐츠인 경우', '콘텐츠의 경우', '콘텐츠일 때', '콘텐츠인 때'],
 	presenceSections: ['표시 내용', '표시'],
 	presenceEndings: ['제공', '노출', '표시', '제공됨', '노출됨', '표시됨']
@@ -284,13 +298,19 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 		if (/선택\s*불가/.test(body)) add('no-action', 'code', null, 'OK를 눌러도 동작 없음');
 		const still = checks.some((c) => c.kind === 'motion' && c.value === 'still');
 		if (/미노출|노출되지\s*않|제공하지\s*않/.test(body) && !still) add('absence', 'code', null, '요소가 없어야 함');
+		const toggle = options.togglePatterns.some((p) => new RegExp(p, 'i').test(body));
+		if (toggle) add('toggle', 'code', null, 'OK로 켜고 끄기 (OK 전후 상태 표시 비교, 다시 OK로 되돌림)');
+		const grid = options.gridPatterns.some((p) => new RegExp(p, 'i').test(body));
+		if (grid) add('layout', 'code', 'grid', '그리드 배치 (보이는 항목의 줄·칸 수)');
 		if (
+			!toggle &&
+			!grid &&
 			/(선택|누르|누를|변경|버튼을)\S*\s*(시|경우|하면|거나)/.test(body) &&
 			/(닫힘|열림|제공|이동|호출|동작|노출)/.test(body)
 		) {
 			add('behavior', 'code', null, '조작 → 결과 (계획에 조작 단계를 넣어 확인)');
 		}
-		if (/가능$|루프/.test(body.replace(/[.\s]+$/, '')))
+		if (!toggle && /가능$|루프/.test(body.replace(/[.\s]+$/, '')))
 			add('behavior', 'code', null, '조작 → 결과 (계획에 조작 단계를 넣어 확인)');
 
 		if (ref === undefined || !/참고/.test(t)) {

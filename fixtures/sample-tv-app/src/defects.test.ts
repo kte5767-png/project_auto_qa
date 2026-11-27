@@ -63,6 +63,12 @@ describe('validateDefectsFile', () => {
 		expect(errors.some((e) => e.includes('waitMs'))).toBe(true);
 	});
 
+	it('input은 비어 있지 않은 글자만', () => {
+		expect(validateDefectsFile({ version: 1, defects: [{ ...valid, input: 'bali' }] })).toEqual([]);
+		const errors = validateDefectsFile({ version: 1, defects: [{ ...valid, input: ' ' }] });
+		expect(errors.some((e) => e.includes('input'))).toBe(true);
+	});
+
 	it('객체가 아니면 오류', () => {
 		expect(validateDefectsFile(null)).not.toEqual([]);
 		expect(validateDefectsFile({ version: 2, defects: 'x' })).toHaveLength(2);

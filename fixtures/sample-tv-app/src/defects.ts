@@ -23,6 +23,8 @@ export interface DefectSpec {
 	baselineFocus?: string;
 	/** reproKeys 뒤 관찰 전에 기다리는 시간 (ms). 시간이 지나야 드러나는 결함(Marquee)만 */
 	waitMs?: number;
+	/** reproKeys 뒤 입력란에 넣고 Enter로 확정할 글자 (검색 결과가 있어야 드러나는 결함만) */
+	input?: string;
 }
 
 export interface DefectsFile {
@@ -81,6 +83,10 @@ export function validateDefectsFile(data: unknown): string[] {
 		const wait = d['waitMs'];
 		if (wait !== undefined && (typeof wait !== 'number' || !Number.isFinite(wait) || wait < 0)) {
 			errors.push(`${where}: waitMs는 0 이상의 숫자여야 합니다.`);
+		}
+		const input = d['input'];
+		if (input !== undefined && (typeof input !== 'string' || input.trim() === '')) {
+			errors.push(`${where}: input은 비어 있지 않은 문자열이어야 합니다.`);
 		}
 		if ((d['category'] === 'focus' || d['category'] === 'flow') && d['baselineFocus'] === undefined) {
 			errors.push(`${where}: focus·flow 결함은 baselineFocus가 필요합니다.`);

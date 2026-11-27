@@ -36,11 +36,13 @@ import {
 	VERDICT_LABEL,
 	aggregateStep,
 	checkExactText,
+	checkGrid,
 	checkMaxCount,
 	checkPresence,
+	checkToggle,
 	splitClauses
 } from '@auto-qa/judge';
-import type { Check, CheckResult, Clause, StepVerdict, Verdict } from '@auto-qa/judge';
+import type { Check, CheckResult, Clause, StepVerdict, ToggleSample, Verdict } from '@auto-qa/judge';
 import {
 	DEFAULT_KEYMAP_OPTIONS,
 	DEFAULT_ROUTE_OPTIONS,
@@ -416,6 +418,42 @@ async function checkInputs(
  * - uninterrupted: 목표에서 OK(선택) 바로 뒤, 끝나기 전에 이 콜아웃에서 "동작 없음"인 키를 끼워 넣고, 자리 잡은 뒤
  *   OK가 가는 곳(화면 최상단 Default 포커스 항목)이 화면 위쪽 안에 보이는지 (스크롤이 중간에 멈추지 않았는지)
  */
+/** 토글 판정용 포커스 요소 표시: 위치·id는 상태와 무관하게 같은 요소를 가리키고, 상태는 aria·체크·클래스·글자 */
+function toggleSample(o: Observation): ToggleSample {
+	const f = o.focus;
+	if (f === null) return { identity: null, state: '', text: '' };
+	return { identity: `${f.spotlightId ?? f.tag}@${f.rect[0]},${f.rect[1]}`, state: f.state, text: f.text };
+}
+
+/** "On/Off 가능": 목표에서 OK → 상태가 바뀌는지, 다시 OK → 처음으로 돌아오는지 (다음 단계가 같은 상태에서 시작하도록 되돌린다) */
+async function checkToggleClause(
+	runner: Runner,
+	screen: string,
+	no: string,
+	element: string,
+	clause: Clause,
+	check: Check,
+	trail: Trail[]
+): Promise<CheckResult> {
+	const miss = await runner.reach(screen, no, trail);
+	if (miss !== null) return res(clause, check, 'needs-review', miss.reason);
+	runner.ctx.live.phase('켜고 끄기 확인 중');
+	const before = toggleSample(await runner.session.observe());
+	const a = await runner.session.press('OK');
+	record(trail, { key: 'OK', focus: focusText(a.obs), stable: a.stable }, '    토글 ');
+	const first = toggleSample(a.obs);
+	let second: ToggleSample | null = null;
+	// 같은 요소에 머물렀을 때만 다시 눌러 되돌린다 (다른 곳으로 갔으면 OK를 더 누르지 않음)
+	if (before.identity !== null && first.identity === before.identity) {
+		const b = await runner.session.press('OK');
+		record(trail, { key: 'OK', focus: focusText(b.obs), stable: b.stable }, '    되돌림 ');
+		second = toggleSample(b.obs);
+	}
+	const r = checkToggle(before, first, second, element);
+	if (!r.restored) console.log(`      [주의] ${r.explanation} — 다음 단계 상태가 달라질 수 있음`);
+	return res(clause, check, r.verdict, r.explanation);
+}
+
 async function checkOperation(
 	runner: Runner,
 	screen: string,
@@ -1289,6 +1327,10 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	const motionChecks: { clause: Clause; check: Check }[] = [];
 	const opChecks: { clause: Clause; check: Check; op: OperationPlan }[] = [];
 	const inputChecks: { clause: Clause; check: Check }[] = [];
+	const toggleChecks: { clause: Clause; check: Check }[] = [];
+	// 켜고 끄는 단계에서 "선택 시" 묶음의 다른 조건은 바뀐 상태에 따른 결과다 ("Off한 경우 … 제공하지 않음").
+	// 상태를 바꾼 뒤 다른 화면에서 봐야 하므로 OK 한 번의 결과로 보지 않는다 (OK는 토글 판정만 누르고 되돌린다)
+	const hasToggle = clauses.some((c) => c.checks.some((k) => k.kind === 'toggle'));
 
 	for (const clause of clauses) {
 		// "선택 시" 묶음의 있는지·포커스 조건은 OK를 누른 뒤의 결과다
@@ -1311,6 +1353,21 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 				continue;
 			}
 			const shown = t !== undefined && t.visible > 0;
+			if (
+				hasToggle &&
+				onSelect &&
+				['presence', 'focus', 'absence', 'behavior', 'transition', 'no-action'].includes(check.kind)
+			) {
+				results.push(
+					res(
+						clause,
+						check,
+						'needs-review',
+						'켜고 끈 상태에 따른 결과 — 상태를 바꾼 뒤 다른 화면에서 보는 확인은 아직 없음'
+					)
+				);
+				continue;
+			}
 			if (onSelect && (check.kind === 'presence' || check.kind === 'focus')) {
 				okChecks.push({ clause, check, after: check.kind });
 				continue;
@@ -1401,6 +1458,17 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 				case 'input':
 					inputChecks.push({ clause, check });
 					break;
+				case 'toggle':
+					toggleChecks.push({ clause, check });
+					break;
+				case 'layout': {
+					if (!shown) results.push(res(clause, check, 'fail', `${element}이(가) 보이지 않음`));
+					else {
+						const r = checkGrid(t.itemRects, obs.viewport[0], element);
+						results.push(res(clause, check, r.verdict, r.explanation));
+					}
+					break;
+				}
 				case 'key':
 					keyChecks.push({ clause, check });
 					break;
@@ -1492,6 +1560,14 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		if (move.verdict !== null && move.verdict !== 'pass') {
 			console.log(`      [${VERDICT_LABEL[move.verdict]}] ${move.explanation}`);
 		}
+	}
+
+	for (const { clause, check } of toggleChecks) {
+		results.push(
+			blocked !== null
+				? res(clause, check, 'needs-review', blocked)
+				: await checkToggleClause(runner, screen, no, element, clause, check, trail)
+		);
 	}
 
 	// 선택 시: 목표에서 OK 한 번을 누르고 결과(화면 전환·나타난 것·포커스·변화 없음)를 함께 본다

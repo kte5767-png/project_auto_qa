@@ -315,6 +315,33 @@ body {
 	color: #000;
 }
 
+.search-save {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	box-sizing: border-box;
+	padding: 0 24px;
+	border-radius: 36px;
+	background: #2b2b2b;
+	font-size: 26px;
+}
+
+.search-save.focused,
+.search-save:focus {
+	background: #fff;
+	color: #000;
+}
+
+.search-switch {
+	min-width: 64px;
+	text-align: right;
+	opacity: 0.6;
+}
+
+.search-switch.on {
+	opacity: 1;
+}
+
 .search-field {
 	display: flex;
 	align-items: center;

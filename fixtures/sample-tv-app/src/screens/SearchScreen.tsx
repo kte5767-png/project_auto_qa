@@ -40,7 +40,8 @@ function CardTitle({ text, marquee, testId }: { text: string; marquee: boolean; 
 }
 
 export function SearchScreen({ onBack }: SearchScreenProps) {
-	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch } = useApp();
+	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch, saveRecent, setSaveRecent } =
+		useApp();
 	// 최근 검색어가 있으면 그 줄이 맨 위에 생기고 아래 섹션이 내려간다 (화면설계서 4.3)
 	const shift = recentSearches.length > 0 ? 162 : 0;
 	const { search } = layout;
@@ -147,6 +148,30 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 					onKeyDown={onInputKeyDown}
 				/>
 			</Focusable>
+			{/* 최근 검색어 저장 On/Off (화면설계서 4.4를 검색창 옆 버튼으로 줄임). D16은 OK를 눌러도 안 바뀜 */}
+			<Focusable
+				id="search-save"
+				testId="search-save"
+				className="search-save"
+				style={{
+					left: search.fieldLeft + search.fieldWidth + 24,
+					top: search.fieldTop,
+					width: 300,
+					height: search.fieldHeight
+				}}
+				onSelect={() => {
+					if (search.saveToggle) setSaveRecent(!saveRecent);
+				}}
+			>
+				<span>Save history</span>
+				<span
+					role="switch"
+					aria-checked={saveRecent}
+					className={saveRecent ? 'search-switch on' : 'search-switch'}
+				>
+					{saveRecent ? 'On' : 'Off'}
+				</span>
+			</Focusable>
 
 			{submitted === null && (
 				<>
@@ -220,8 +245,9 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 							testId={`search-result-${i + 1}`}
 							className="search-card"
 							style={{
-								left: 210 + i * 400,
-								top: 246,
+								// 그리드(화면설계서 4.5). resultColumns 0(D15)은 한 줄 가로 목록
+								left: 210 + (search.resultColumns > 0 ? i % search.resultColumns : i) * 400,
+								top: 246 + (search.resultColumns > 0 ? Math.floor(i / search.resultColumns) : 0) * 236,
 								width: 388,
 								height: 216,
 								background: gradientOf(card.hue)

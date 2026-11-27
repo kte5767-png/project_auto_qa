@@ -14,13 +14,15 @@ function list(name: string, items: string[], focusItem = -1): ObservedTarget {
 		hasFocus: focusItem >= 0,
 		focusItem,
 		textOverflow: { overflowing: 0, ellipsis: 0 },
-		rect: [0, 0, 100, 100]
+		rect: [0, 0, 100, 100],
+		itemRects: []
 	};
 }
 
 const obs: Observation = {
 	focus: null,
 	targets: [list('카테고리', ['All 12', 'Place 3', 'Driving 1'], 0), list('결과', ['Driving Tour', 'Bali'])],
+	viewport: [1920, 1080],
 	errors: []
 };
 const scope = [
