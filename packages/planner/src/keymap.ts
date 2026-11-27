@@ -66,6 +66,11 @@ export interface KeyMapOptions {
 	 */
 	directionWords: Record<'up' | 'down' | 'left' | 'right', string[]>;
 	itemWords: string[];
+	/**
+	 * 키 방향의 다른 영역: 키와 같은 방향 낱말 + 영역 낱말 ("[▲] 위 쉘프 영역 마지막 포커스로 이동").
+	 * 문장이 방향으로 대상을 가리키므로 키 방향에서 가장 가까운 콜아웃이 대상이다 (추정이 아님)
+	 */
+	areaWords: string[];
 	lastWords: string[];
 	memoryWords: string[];
 	/**
@@ -110,6 +115,7 @@ export const DEFAULT_KEYMAP_OPTIONS: KeyMapOptions = {
 		right: ['오른쪽', '우측']
 	},
 	itemWords: ['콘텐츠', '항목', '아이템', '카드', '썸네일'],
+	areaWords: ['쉘프', '셸프', '영역', '리스트', '목록', '섹션'],
 	lastWords: ['마지막'],
 	memoryWords: ['이동한 이력', '이력이 있을'],
 	lastFocusWords: [
@@ -346,6 +352,16 @@ export function parseKeyAction(
 		const dir = [...options.directionWords[key]].sort((a, b) => b.length - a.length);
 		const nouns = [...options.itemWords].sort((a, b) => b.length - a.length);
 		const rel = new RegExp(`^(?:${dir.map(escapeRegExp).join('|')})\\s*(?:${nouns.map(escapeRegExp).join('|')})`);
+		const areas = [...options.areaWords].sort((a, b) => b.length - a.length);
+		const area = new RegExp(`^(?:${dir.map(escapeRegExp).join('|')})\\s*(?:${areas.map(escapeRegExp).join('|')})`);
+		const nearest = area.test(main) ? calloutsInDirection(from, key, callouts, options)[0] : undefined;
+		if (nearest !== undefined) {
+			const position: 'first' | 'last' = hasAny(main, options.lastWords) ? 'last' : 'first';
+			return done(
+				{ kind: 'move', to: nearest.no, position, item: null, memory },
+				`"${main}" = 키 방향 영역 ${nearest.no}번`
+			);
+		}
 		if (rel.test(main)) {
 			const delta = key === 'down' || key === 'right' ? 1 : -1;
 			return key === 'left' || key === 'right'

@@ -113,6 +113,10 @@ describe('키 동작 해석', () => {
 		expect(parse('right', '우측 콘텐츠로 이동 (더 이상 이동할 항목이 없을 경우 동작 없음)')).toBe('next');
 		expect(parse('down', '아래 콘텐츠로 이동')).toBe('row-next');
 		expect(parse('up', '위쪽 항목으로 이동')).toBe('row-prev');
+		// 키 방향의 다른 영역은 그 방향에서 가장 가까운 콜아웃 (문장이 방향으로 가리킴 — 추정 아님)
+		const area = parseKeyAction(grid, 'down', '아래 쉘프 영역 마지막 포커스로 이동', screen.callouts);
+		expect(describeEffect(area.effect)).toBe('move:4:first+memory');
+		expect(area.estimate).toBeNull();
 		// 방향이 키와 다르면 같은 목록 안 이동이 아니다
 		expect(parse('down', '좌측 상단 첫 번째 콘텐츠 포커스')).not.toBe('row-next');
 		expect(parse('up', '위 쉘프 영역 마지막 포커스로 이동')).not.toBe('row-prev');
