@@ -130,3 +130,60 @@ export function mutateKeyLine(
 		text: replaceKeyLine(expected, line, body)
 	};
 }
+
+/**
+ * 키 밖의 조건을 틀리게 바꾸기 (원래 실행에서 Pass였던 조건만, 바꾸면 반드시 Fail이어야 하는 것):
+ * - count-below: "최대 5개" → "최대 {보인 개수 - 1}개" (보인 개수가 2 이상일 때)
+ * - text-changed: 정해진 문구 “X” → “X 틀림”
+ * clause는 splitClauses가 만든 조건 글자. 바꾼 조건 글자(after)는 바꾼 칸을 다시 나눠 얻는다(실행 결과와 맞춰 보려고)
+ */
+export type ValueMutationOp = 'count-below' | 'text-changed';
+
+export interface ValueMutation {
+	op: ValueMutationOp;
+	before: string;
+	after: string;
+	text: string;
+}
+
+const COUNT_PATTERNS = [/(최대\s*)(\d+)(\s*개)/, /(top\s*)(\d+)()/i, /()(\d+)(\s*개(?:까지)?\s*(?:제공|노출|표시))/];
+
+/** 조건 글자가 들어 있는 원문 줄 번호 (조건 첫 부분이 줄과 같은 것). 없으면 -1 */
+function lineOf(expected: string, clause: string): number {
+	const head = clean(clause.split(' / ')[0] ?? clause);
+	return expected.split('\n').findIndex((r) => clean(r) === head);
+}
+
+export function mutateCount(expected: string, clause: string, seen: number): ValueMutation | null {
+	if (seen < 2) return null;
+	const raw = expected.split('\n');
+	const i = lineOf(expected, clause);
+	if (i < 0) return null;
+	const line = raw[i] ?? '';
+	const pattern = COUNT_PATTERNS.find((p) => p.test(line));
+	if (pattern === undefined) return null;
+	const changed = line.replace(pattern, (_m, a: string, _n: string, b: string) => `${a}${seen - 1}${b}`);
+	raw[i] = changed;
+	return {
+		op: 'count-below',
+		before: clause,
+		after: clause.replace(clean(line), clean(changed)),
+		text: raw.join('\n')
+	};
+}
+
+export function mutateExactText(expected: string, clause: string, quoted: string): ValueMutation | null {
+	const raw = expected.split('\n');
+	const i = lineOf(expected, clause);
+	if (i < 0 || quoted.trim() === '') return null;
+	const line = raw[i] ?? '';
+	if (!line.includes(quoted)) return null;
+	const changed = line.replace(quoted, `${quoted} 틀림`);
+	raw[i] = changed;
+	return {
+		op: 'text-changed',
+		before: clause,
+		after: clause.replace(clean(line), clean(changed)),
+		text: raw.join('\n')
+	};
+}

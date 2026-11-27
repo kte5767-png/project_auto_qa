@@ -85,12 +85,57 @@ describe('planMutations', () => {
 
 	it('Pass인 키 조건이 없거나, 같은 화면에 다른 콜아웃 이름이 없으면 건너뛴다 (측정에서 뺌)', () => {
 		expect(plan.skipped).toEqual([
-			{ key: 'Search!4', reason: '원래 실행에서 Pass인 키 조건이 없음' },
-			{ key: 'Search!9', reason: 'Pass인 키 조건을 바꿀 수 없음 (다른 콜아웃 이름 없음)' }
+			{ key: 'Search!4', reason: '원래 실행에서 Pass인 조건이 없음 (key)' },
+			{ key: 'Search!9', reason: 'Pass인 조건을 바꿀 수 없음 (다른 콜아웃 이름·보인 개수·문구 없음)' }
 		]);
 	});
 
 	it('시트를 고르면 그 시트만', () => {
 		expect(planMutations(CASES, baseline, () => 'G', 'Home').mutations).toEqual([]);
+	});
+});
+
+describe('planMutations — 개수·문구', () => {
+	const expected = [
+		'1)표시 내용',
+		'- 최대 5개까지 제공',
+		'- 타이틀 “Top Picks” 제공',
+		'2)포커스 시',
+		'[▲] 동작 없음'
+	].join('\n');
+	const cases = [tcCase('9.4', [step(12, '1', 'Top Picks', expected), step(13, '2', 'Weekly', '[▲] 동작 없음')])];
+	const baseline = [
+		{
+			key: 'Search!12',
+			status: 'pass',
+			results: [
+				{ clause: '최대 5개까지 제공', kind: 'count', verdict: 'pass', value: 5, observed: 4 },
+				{ clause: '타이틀 “Top Picks” 제공', kind: 'exact-text', verdict: 'pass', value: 'Top Picks' },
+				pass('[▲] 동작 없음')
+			]
+		}
+	];
+
+	it('종류마다 하나씩 바꾸고, 한 칸에 모두 겹쳐 쓴다', () => {
+		const plan = planMutations(cases, baseline, () => 'G', null, ['key', 'count', 'exact-text']);
+		expect(plan.mutations.map((m) => [m.kind, m.op, m.after])).toEqual([
+			['key', 'none-to-move', '[▲] Weekly 포커스'],
+			['count', 'count-below', '최대 3개까지 제공'],
+			['exact-text', 'text-changed', '타이틀 “Top Picks 틀림” 제공']
+		]);
+		const text = plan.mutations[0]?.text ?? '';
+		expect(plan.mutations.every((m) => m.text === text)).toBe(true);
+		expect(text).toContain('최대 3개까지 제공');
+		expect(text).toContain('“Top Picks 틀림”');
+		expect(text).toContain('[▲] Weekly 포커스');
+	});
+
+	it('고른 종류만 바꾼다 (보인 개수가 없으면 개수는 못 바꿈)', () => {
+		const plan = planMutations(cases, baseline, () => 'G', null, ['count']);
+		expect(plan.mutations.map((m) => m.after)).toEqual(['최대 3개까지 제공']);
+		const noSeen = [{ ...baseline[0], results: [{ clause: '최대 5개까지 제공', kind: 'count', verdict: 'pass' }] }];
+		const none = planMutations(cases, noSeen as typeof baseline, () => 'G', null, ['count']);
+		expect(none.mutations).toEqual([]);
+		expect(none.skipped[0]?.key).toBe('Search!12');
 	});
 });

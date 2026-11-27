@@ -145,18 +145,20 @@ pnpm spike:tc-run --score spikes/p0-8-e2e/out/tc-<시각>/result.json --truth <Q
 
 ### Fail 검출률 (일부러 틀린 TC)
 
-원본 QA 결과가 모두 Pass이면 일치율만으로는 "무엇이든 Pass를 주는 엔진"과 구별이 안 됩니다. 그래서 원래 실행에서 Pass였던 키 조건을 단계마다 하나씩 앱과 다르게 바꾼 TC 사본을 만들고, 같은 앱에 돌려 그 조건을 Fail로 잡는지 봅니다. 원본은 읽기만 하고, 바꾸는 것은 기대 결과 칸의 키 줄 하나뿐입니다(앱·데이터와 무관).
+원본 QA 결과가 모두 Pass이면 일치율만으로는 "무엇이든 Pass를 주는 엔진"과 구별이 안 됩니다. 그래서 원래 실행에서 Pass였던 조건을 단계마다 종류별로 하나씩 앱과 다르게 바꾼 TC 사본을 만들고, 같은 앱에 돌려 그 조건을 Fail로 잡는지 봅니다. 원본은 읽기만 하고, 바꾸는 것은 기대 결과 칸의 조건 줄뿐입니다(앱·데이터와 무관). 한 단계에서 여러 종류를 바꾸면 한 칸에 겹쳐 쓰고, 검출은 바꾼 조건마다 따로 셉니다.
 
 ```bash
-pnpm spike:tc-mutate <TC.xlsx> --baseline spikes/p0-8-e2e/out/tc-<시각>/result.json --out <틀린 TC.xlsx> [--sheet Search]
+pnpm spike:tc-mutate <TC.xlsx> --baseline spikes/p0-8-e2e/out/tc-<시각>/result.json --out <틀린 TC.xlsx> [--sheet Search] [--kinds key,count,exact-text]
 pnpm spike:tc-run <틀린 TC.xlsx> --profile … --spec … --mutations <틀린 TC.xlsx>.mutations.json
 pnpm spike:tc-run --score spikes/p0-8-e2e/out/tc-<시각>/result.json --mutations <틀린 TC.xlsx>.mutations.json
 ```
 
-| 바꾸기         | 예                                                          | 앱이 원래 TC대로면   |
-| -------------- | ----------------------------------------------------------- | -------------------- |
-| `move-to-none` | `[▼] Back to Top 버튼 포커스` → `[▼] 동작 없음`             | 포커스가 움직여 Fail |
-| `none-to-move` | `[◀] 동작 없음` → `[◀] <같은 화면 다른 콜아웃 이름> 포커스` | 제자리라 Fail        |
+| 종류 (`--kinds`) | 바꾸기         | 예                                                          | 앱이 원래 TC대로면      |
+| ---------------- | -------------- | ----------------------------------------------------------- | ----------------------- |
+| `key` (기본)     | `move-to-none` | `[▼] Back to Top 버튼 포커스` → `[▼] 동작 없음`             | 포커스가 움직여 Fail    |
+| `key`            | `none-to-move` | `[◀] 동작 없음` → `[◀] <같은 화면 다른 콜아웃 이름> 포커스` | 제자리라 Fail           |
+| `count`          | `count-below`  | `최대 5개` → `최대 <원래 실행에서 보인 개수 - 1>개`         | 보인 개수가 상한을 넘음 |
+| `exact-text`     | `text-changed` | `“Search your place.”` → `“Search your place. 틀림”`        | 문구가 달라 Fail        |
 
 검출 = 바꾼 조건이 Fail, 놓침 = 바꾼 조건이 Pass(틀린 Pass, 가장 위험), 판정 못 함 = 확인 불가·확인 필요·미실행. 키 줄 아래 조건 줄(" / …")은 함께 지웁니다(남으면 바꾼 뜻이 되돌려질 수 있음).
 

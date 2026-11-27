@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { splitClauses } from './clauses';
-import { keyLines, mutateKeyLine, replaceKeyLine } from './mutate';
+import { keyLines, mutateCount, mutateExactText, mutateKeyLine, replaceKeyLine } from './mutate';
 
 /** 합성 기대 결과 (TC 꼴: 묶음 제목, 키 줄, 키 줄 아래 조건 줄, 이체 선택자) */
 const EXPECTED = [
@@ -70,5 +70,23 @@ describe('mutateKeyLine', () => {
 		const text = '  - [▼] Top Picks 포커스';
 		const [line] = keyLines(text);
 		expect(line === undefined ? '' : replaceKeyLine(text, line, '동작 없음')).toBe('  - [▼] 동작 없음');
+	});
+});
+
+describe('키 밖의 조건 바꾸기', () => {
+	const text = ['1)표시 내용', '- 최대 5개까지 제공', '- 플레이스 홀더 “Search your place.” 제공'].join('\n');
+
+	it('개수 상한을 보인 개수보다 작게 바꾸고, 바꾼 조건 글자는 splitClauses와 같다', () => {
+		const m = mutateCount(text, '최대 5개까지 제공', 3);
+		expect(m).toMatchObject({ op: 'count-below', after: '최대 2개까지 제공' });
+		expect(splitClauses(m?.text ?? '').map((c) => c.text)).toContain(m?.after);
+		expect(mutateCount(text, '최대 5개까지 제공', 1)).toBeNull();
+	});
+
+	it('정해진 문구를 바꾼다', () => {
+		const m = mutateExactText(text, '플레이스 홀더 “Search your place.” 제공', 'Search your place.');
+		expect(m?.after).toBe('플레이스 홀더 “Search your place. 틀림” 제공');
+		const changed = splitClauses(m?.text ?? '').find((c) => c.text === m?.after);
+		expect(changed?.checks.find((c) => c.kind === 'exact-text')?.value).toBe('Search your place. 틀림');
 	});
 });

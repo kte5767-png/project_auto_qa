@@ -143,7 +143,17 @@ interface StepRun {
 	status: StepStatus;
 	explanation: string;
 	basis: string;
-	results: { clause: string; kind: string; oracle: string; verdict: Verdict | null; explanation: string }[];
+	results: {
+		clause: string;
+		kind: string;
+		oracle: string;
+		verdict: Verdict | null;
+		explanation: string;
+		/** 조건 값 (개수 상한·문구 등) */
+		value?: string | number | null;
+		/** 코드가 잰 값 (보인 개수 등) */
+		observed?: number;
+	}[];
 	trail: Trail[];
 	screenshot: string | null;
 	ms: number;
@@ -1329,7 +1339,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 					} else if (!shown) results.push(res(clause, check, 'fail', `${element}이(가) 보이지 않음`));
 					else {
 						const r = checkMaxCount(Number(check.value), t.itemCount, element);
-						results.push(res(clause, check, r.verdict, r.explanation));
+						results.push({ ...res(clause, check, r.verdict, r.explanation), observed: t.itemCount });
 					}
 					break;
 				}
@@ -1638,7 +1648,9 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 			kind: r.check.kind,
 			oracle: r.oracle,
 			verdict: r.verdict,
-			explanation: r.explanation
+			explanation: r.explanation,
+			value: r.check.value,
+			...(r.observed === undefined ? {} : { observed: r.observed })
 		})),
 		trail,
 		screenshot,
@@ -1735,6 +1747,8 @@ function scoreText(sc: Score): string[] {
 
 interface MutationEntryLite {
 	key: string;
+	/** 바꾼 조건 종류 (없으면 키 조건 — 이전 형식) */
+	kind?: string;
 	op: string;
 	before: string;
 	after: string;
@@ -1748,13 +1762,13 @@ interface Detection {
 	lines: string[];
 }
 
-/** 바꾼 키 조건마다: 엔진이 Fail로 잡았나(검출) / Pass로 넘겼나(놓침, 틀린 Pass) / 판정 못 했나 */
+/** 바꾼 조건마다: 엔진이 Fail로 잡았나(검출) / Pass로 넘겼나(놓침, 틀린 Pass) / 판정 못 했나 */
 function detection(steps: readonly StepRun[], mutations: readonly MutationEntryLite[]): Detection {
 	const d: Detection = { total: mutations.length, caught: [], missed: [], undecided: [], lines: [] };
 	d.lines.push('| 단계 | 바꾼 조건 | 결과 | 설명 |', '|---|---|---|---|');
 	for (const m of mutations) {
 		const step = steps.find((x) => x.key === m.key);
-		const r = step?.results.find((x) => x.kind === 'key' && x.clause === m.after);
+		const r = step?.results.find((x) => x.kind === (m.kind ?? 'key') && x.clause === m.after);
 		let mark: string;
 		if (r?.verdict === 'fail') {
 			d.caught.push(m.key);
