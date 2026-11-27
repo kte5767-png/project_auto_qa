@@ -44,6 +44,13 @@ export interface AppLinkOptions {
 	stateClass: RegExp;
 	/** 좁히기(포커스 영역·목록 묶음)를 해 볼 상위 후보 수 */
 	refineTop: number;
+	/**
+	 * 콜아웃 이름이 영역·목록을 뜻하는 낱말 (정규식 원문, "카테고리 필터 영역"). 목업 표시가 첫 항목만 가리켜도
+	 * 같은 항목이 나란히 있으면 목록으로 넓힌다
+	 */
+	areaWords: string;
+	/** 목록으로 넓힌 뒤, 같은 항목만 담은 포커스 묶음(data-spotlight-container·spotlight id)까지 올라가 볼 단계 수 */
+	containerLift: number;
 	/** 다시 그릴 때 번호가 바뀌는 이름 (예: container-12) */
 	counterName: RegExp;
 }
@@ -62,6 +69,8 @@ export const DEFAULT_APP_LINK_OPTIONS: AppLinkOptions = {
 	alternatives: 3,
 	minGroup: 2,
 	refineTop: 30,
+	areaWords: '영역|목록|리스트|탭|area|list|tabs?$',
+	containerLift: 2,
 	stateClass:
 		/(^|[_-])(focus(ed)?|selected|active|pressed|hover(ed)?|checked|disabled|on|off)([_-]|$)|[a-z](Focus(ed)?|Selected|Active|Pressed|Hover(ed)?|Checked|Disabled)$|^spottable-next-/,
 	counterName: /(^|[-_])\d+$/
@@ -121,6 +130,8 @@ export interface AppScreenLink {
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 /** 두 사각형 사이 거리 (겹치면 0) */
+const screenAreaOf = (snapshot: DomSnapshot): number => snapshot.viewport.width * snapshot.viewport.height;
+
 function gap(a: Rect, b: Rect): number {
 	const dx = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.width, b.x + b.width));
 	const dy = Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.height, b.y + b.height));
@@ -352,6 +363,23 @@ export function linkCalloutToApp(
 		if (!ranked.some((x) => x.nodes.join() === r.nodes.join())) ranked.push(r);
 	}
 	ranked.push(...scored.slice(options.refineTop));
+	// 1위와 거의 같은 점수의 후보들이 한 요소 안에 모두 들어 있으면(버튼 셋과 그 줄) 그 요소가 콜아웃 영역이다
+	const top = ranked[0];
+	if (top !== undefined) {
+		const limit = screenAreaOf(snapshot) * options.maxAreaRatio;
+		const tied = ranked.filter((x) => top.score - x.score < options.ambiguityMargin && area(x.rect) <= limit);
+		const covers = (x: AppLinkCandidate, y: AppLinkCandidate): boolean =>
+			y.nodes.every((j) => x.nodes.some((i) => selfOrAncestor(snapshot, i, j)));
+		const outer =
+			tied.length > 1 && tied.includes(top) ? tied.find((x) => tied.every((y) => covers(x, y))) : undefined;
+		if (outer !== undefined && outer !== top) {
+			ranked.splice(ranked.indexOf(outer), 1);
+			ranked.unshift({
+				...outer,
+				refined: [outer.refined, '같은 점수 후보를 모두 담은 요소'].filter(Boolean).join(', ')
+			});
+		}
+	}
 	const best = ranked[0];
 	if (best === undefined || best.score < options.minScore) {
 		return {
@@ -374,7 +402,10 @@ export function linkCalloutToApp(
 		if (alternatives.some((y) => same(x, y))) continue;
 		alternatives.push(x);
 	}
-	const second = alternatives[0];
+	// 고른 요소 안에 든 후보(항목·부품)는 경쟁 후보가 아니다
+	const inside = (x: AppLinkCandidate): boolean =>
+		x.nodes.every((j) => best.nodes.some((i) => selfOrAncestor(snapshot, i, j)));
+	const second = alternatives.find((x) => !inside(x));
 	const ambiguous = second !== undefined && best.score - second.score < options.ambiguityMargin;
 	const selector = chooseSelector(snapshot, group, options);
 	const why = [
@@ -411,6 +442,22 @@ export function focusContainer(snapshot: DomSnapshot, cache: SnapshotCache, node
 		if (kids.length !== 1 || only === undefined || (cache.focusables[only] ?? 0) !== total) return cur;
 		cur = only;
 	}
+}
+
+/**
+ * 목록 묶음: 항목들의 부모에서 몇 단계 위까지, 같은 포커스 가능 요소만 담은 포커스 묶음(data-spotlight-container 또는
+ * spotlight id가 있는 요소)이 있으면 그것 (Enact 목록은 스크롤 안쪽 줄을 감싼 묶음에 이름이 붙는다). 없으면 부모
+ */
+function listContainer(snapshot: DomSnapshot, cache: SnapshotCache, parent: number, options: AppLinkOptions): number {
+	const want = cache.focusables[parent] ?? 0;
+	let cur = parent;
+	for (let k = 0; k <= options.containerLift && cur >= 0; k++) {
+		const n = snapshot.nodes[cur];
+		if (n === undefined || (cache.focusables[cur] ?? 0) !== want) break;
+		if (n.container || (n.spotlightId !== null && !options.counterName.test(n.spotlightId))) return cur;
+		cur = n.parent;
+	}
+	return parent;
 }
 
 /**
@@ -452,9 +499,16 @@ function refineCandidate(
 		if (group.length >= options.minGroup) {
 			const rects = group.map((m) => snapshot.nodes[m]?.rect).filter((r): r is Rect => r !== undefined);
 			const whole = iou(rect, unionRect(rects));
-			if (whole >= options.minGeometryIou && whole > iou(rect, itemNode.rect)) {
-				node = itemNode.parent;
-				notes.push(`항목 ${group.length}개의 목록으로 넓힘`);
+			const named = callout.names.some((n) => new RegExp(options.areaWords, 'i').test(n));
+			const list = listContainer(snapshot, cache, itemNode.parent, options);
+			const listRect = snapshot.nodes[list]?.rect;
+			// 항목들을 감싼 요소가 없어 부모가 화면 전체에 가까우면 넓히지 않는다 (그때는 형제 묶음 후보가 목록이다)
+			const tight = listRect !== undefined && area(listRect) <= screenAreaOf(snapshot) * options.maxAreaRatio;
+			if (tight && ((whole >= options.minGeometryIou && whole > iou(rect, itemNode.rect)) || named)) {
+				node = list;
+				notes.push(
+					`항목 ${group.length}개의 목록으로 넓힘${named && whole <= iou(rect, itemNode.rect) ? ' (이름이 영역)' : ''}`
+				);
 			}
 		}
 	}

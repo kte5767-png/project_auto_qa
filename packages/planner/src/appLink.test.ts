@@ -339,3 +339,61 @@ describe('콜아웃 = 포커스 영역 (프로필 대응의 관례)', () => {
 		expect(link?.selector?.selector).not.toContain('Active');
 	});
 });
+
+describe('영역 이름·같은 점수 후보', () => {
+	/**
+	 * 0 body, 1 패널, 2 탭 묶음(spotlight container) > 3 스크롤 안쪽 > 4~6 탭,
+	 * 7 키워드 줄 > 8~10 키워드 버튼
+	 */
+	const PAGE = snap([
+		{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+		{ parent: 0, rect: r(0, 0, 1920, 1080) },
+		{
+			parent: 1,
+			classes: ['TabGroup_viewport'],
+			spotlightId: 'search-result-tabs',
+			container: true,
+			rect: r(0, 182, 1920, 124)
+		},
+		{ parent: 2, classes: ['Scroller_content'], rect: r(180, 200, 1200, 80) },
+		...['All', 'Flights', 'Hotels'].map((t, k) => ({
+			parent: 3,
+			classes: ['Tab_tab', 'spottable'],
+			ownText: t,
+			focusable: true,
+			rect: r(180 + k * 220, 200, 200, 80)
+		})),
+		{ parent: 1, classes: ['Keywords_row'], rect: r(180, 600, 1100, 70) },
+		...['Bali', 'Family', 'Romantic'].map((t, k) => ({
+			parent: 7,
+			classes: ['Keywords_chip', 'spottable'],
+			ownText: t,
+			focusable: true,
+			rect: r(180 + k * 380, 600, 340, 70)
+		}))
+	]);
+	const linkOne = (c: NavCallout): ReturnType<typeof linkScreenToApp>['callouts'][number] | undefined =>
+		linkScreenToApp({ ...NAV, callouts: [c] }, PAGE).callouts[0];
+
+	it('이름이 영역·목록이면 첫 항목에 그린 콜아웃도 항목들을 담은 포커스 묶음으로 넓힌다', () => {
+		const link = linkOne(callout('2', '카테고리 필터 영역', ['All'], r(175, 195, 210, 90), { right: '다음 탭' }));
+		expect(link?.best?.node).toBe(2);
+		expect(link?.selector).toMatchObject({
+			selector: '[data-spotlight-id="search-result-tabs"]',
+			items: '.Tab_tab'
+		});
+		expect(link?.reason).toContain('이름이 영역');
+	});
+
+	it('이름이 영역이 아니고 위치가 항목 하나에 맞으면 그 항목', () => {
+		const link = linkOne(callout('2', 'All 버튼', ['All'], r(175, 195, 210, 90), { right: '다음 탭' }));
+		expect(link?.best?.node).toBe(4);
+	});
+
+	it('같은 점수의 버튼들과 그 줄이 겨루면 모두 담은 줄을 고른다', () => {
+		// 목업 글자가 앱에 없고, 콜아웃이 줄 바로 위에 그려져 겹침 없이 거리만 같다
+		const link = linkOne(callout('3', '추천 키워드', ['목업 키워드'], r(180, 560, 1100, 30), { down: '아래로' }));
+		expect(link?.best?.node).toBe(7);
+		expect(link?.reason).toContain('같은 점수 후보를 모두 담은 요소');
+	});
+});

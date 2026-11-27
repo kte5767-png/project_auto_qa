@@ -6,6 +6,7 @@
  *   pnpm spike:tc-run <TC.xlsx> --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec [--truth <QA 결과.xlsx>]
  *   pnpm spike:tc-run --score out/<시각>/result.json --truth <QA 결과.xlsx>
  *   pnpm spike:tc-run --link --profile <앱 프로필.json> --spec <화면설계서 폴더>   (콜아웃 ↔ 앱 요소 자동 연결 채점, D-043 ③)
+ *   pnpm spike:tc-run --graph --profile <앱 프로필.json> --spec <화면설계서 폴더>  (화면 이동 지도 채점, 앱을 열지 않음, D-043 ④)
  *
  * 한 단계 = 화면설계서 콜아웃 하나의 사양(표시 내용·개수·키 동작·선택 시).
  *   1. 그 화면까지 간다 (앱 프로필의 진입 경로). 같은 화면의 단계들은 앱을 한 번만 연다 (D-038)
@@ -61,6 +62,7 @@ import {
 	DEFAULT_KEYMAP_OPTIONS,
 	DEFAULT_ROUTE_OPTIONS,
 	buildKeyMap,
+	buildScreenGraph,
 	containedNameScore,
 	linkScreenToApp,
 	defaultFocusTarget,
@@ -92,6 +94,7 @@ import {
 	checkSpecMove,
 	focusText,
 	jsonFiles,
+	loadGraphScreens,
 	loadNavScreens,
 	note,
 	onTrail,
@@ -114,6 +117,7 @@ import {
 	truthProbes
 } from './linkReport';
 import type { LinkRow } from './linkReport';
+import { GRAPH_REPORT_FORMAT, gradeGraph, graphReportText, profileMoves, summarizeGraph } from './graphReport';
 import { DEFAULT_LIVE_OPTIONS, LiveReporter, isRunId } from './live';
 import {
 	PROFILE_FORMAT,
@@ -150,6 +154,8 @@ const { values, positionals } = parseArgs({
 		score: { type: 'string' },
 		/** TC 실행 대신 콜아웃 ↔ 앱 요소 자동 연결을 프로필 대응(정답)과 비교 (D-043 ③) */
 		link: { type: 'boolean', default: false },
+		/** TC 실행 대신 화면설계서 화면 이동 지도를 프로필 진입 경로와 비교 (앱을 열지 않음, D-043 ④) */
+		graph: { type: 'boolean', default: false },
 		/** 사람이 P/F 열에 결과를 적은 엑셀 (QA 결과 보고서 등, 실행할 TC 파일과 다른 파일) */
 		truth: { type: 'string' },
 		/** 일부러 틀린 TC의 바꾼 목록 (mutate.ts가 만든 <TC>.mutations.json) — 바꾼 조건을 Fail로 잡았는지 잰다 */
@@ -2441,6 +2447,25 @@ async function openHost(url: string, headed: boolean, windowScale: number | unde
 }
 
 /**
+ * 화면 이동 지도 채점 (D-043 ④): 화면설계서 "선택 시" 문장에서 읽은 이동을 프로필 진입 경로(from·entry)와 비교한다.
+ * 앱을 열지 않는다. 결과: out/graph-<시각>/graph-report.md·json (화면설계서 문장 포함). 콘솔에는 번호·판정만 낸다
+ */
+async function graphMain(profile: AppProfile, registry: ElementRegistry, specFiles: readonly string[]): Promise<void> {
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+	const out = join(resolve(cwd, values.out), `graph-${stamp}`);
+	await mkdir(out, { recursive: true });
+	const graph = buildScreenGraph(await loadGraphScreens(specFiles));
+	const rows = gradeGraph(graph, profileMoves(profile, registry));
+	console.log(graphReportText(graph, rows, false).join('\n'));
+	await writeFile(join(out, 'graph-report.md'), `${graphReportText(graph, rows).join('\n')}\n`);
+	await writeFile(
+		join(out, 'graph-report.json'),
+		`${JSON.stringify({ format: GRAPH_REPORT_FORMAT, version: 1, summary: summarizeGraph(graph, rows), rows, graph }, null, '\t')}\n`
+	);
+	console.log(`→ ${join(out, 'graph-report.md')}`);
+}
+
+/**
  * 콜아웃 ↔ 앱 요소 자동 연결 채점 (D-043 ③): 프로필 화면마다 (진입 경로는 아직 프로필 것) 들어가 화면 요소를 읽고,
  * 화면설계서 콜아웃(목업 글자·위치·키 동작)만으로 앱 요소와 선택자를 고른 뒤 프로필 대응(정답)과 비교한다.
  * TC 파일은 쓰지 않는다. 결과: out/link-<시각>/link-report.md·json, 화면별 요소 목록(snapshots/), 프로필 초안
@@ -2576,7 +2601,7 @@ async function main(): Promise<void> {
 	}
 
 	const tcFile = positionals[0];
-	if ((tcFile === undefined && !values.link) || values.profile === undefined) {
+	if ((tcFile === undefined && !values.link && !values.graph) || values.profile === undefined) {
 		throw new Error('사용법: pnpm spike:tc-run <TC.xlsx> --profile <앱 프로필.json> --spec <화면설계서 폴더>');
 	}
 	const raw = JSON.parse(await readFile(resolve(cwd, values.profile), 'utf8')) as unknown;
@@ -2588,6 +2613,11 @@ async function main(): Promise<void> {
 	const specFiles = await jsonFiles(values.spec, cwd);
 	const specNavs = specFiles.length === 0 ? null : await loadNavScreens(specFiles);
 	if (specNavs !== null) console.log(`화면설계서 화면 ${specNavs.size}개: ${[...specNavs.keys()].join(', ')}`);
+	if (values.graph) {
+		if (specFiles.length === 0) throw new Error('--graph에는 --spec(화면설계서 폴더)이 필요합니다');
+		await graphMain(profile, registry, specFiles);
+		return;
+	}
 	if (values.link) {
 		if (specNavs === null) throw new Error('--link에는 --spec(화면설계서 폴더)이 필요합니다');
 		await linkMain(profile, registry, specNavs, options);
