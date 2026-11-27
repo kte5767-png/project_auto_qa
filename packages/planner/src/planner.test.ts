@@ -104,6 +104,20 @@ describe('키 동작 해석', () => {
 		expect(e['4:right']).toBe('next');
 	});
 
+	it('키 방향과 같은 방향의 옆·아래 항목은 같은 목록 안 이동이다 (그리드)', () => {
+		const screen = sampleScreen();
+		const grid = screen.callouts[2];
+		if (grid === undefined) throw new Error('콜아웃 없음');
+		const parse = (key: 'up' | 'down' | 'left' | 'right', text: string): string =>
+			describeEffect(parseKeyAction(grid, key, text, screen.callouts).effect);
+		expect(parse('right', '우측 콘텐츠로 이동 (더 이상 이동할 항목이 없을 경우 동작 없음)')).toBe('next');
+		expect(parse('down', '아래 콘텐츠로 이동')).toBe('row-next');
+		expect(parse('up', '위쪽 항목으로 이동')).toBe('row-prev');
+		// 방향이 키와 다르면 같은 목록 안 이동이 아니다
+		expect(parse('down', '좌측 상단 첫 번째 콘텐츠 포커스')).not.toBe('row-next');
+		expect(parse('up', '위 쉘프 영역 마지막 포커스로 이동')).not.toBe('row-prev');
+	});
+
 	it('이름이 일부만 맞으면 키 방향이 맞을 때만 정한다', () => {
 		const e = effects(sampleScreen());
 		// "필터 메뉴" ↔ "Filter Option 메뉴": 이름 0.4 + 방향(오른쪽) 0.2

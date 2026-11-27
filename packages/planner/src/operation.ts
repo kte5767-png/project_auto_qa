@@ -10,7 +10,9 @@ export type OperationResult =
 	/** 지금 화면(팝업 등)이 닫힌다 */
 	| 'closed'
 	/** 앞 조작(이동·스크롤)이 끼어든 입력에도 끝까지 간다 */
-	| 'uninterrupted';
+	| 'uninterrupted'
+	/** 목록 끝에서 같은 방향 키를 눌러도 반대쪽 끝으로 돌아가지 않는다 ("항목 루프되지 않음") */
+	| 'no-loop';
 
 export interface OperationPlan {
 	/** 누를 키 (문장에 나온 순서). uninterrupted는 빈 배열 — 끼어드는 입력은 실행기가 고른다 */
@@ -28,6 +30,8 @@ export interface OperationOptions {
 	/** "~하더라도 … 중단되지 않음": 끼어드는 입력 낱말과 결과 낱말 */
 	interruptWords: string[];
 	uninterruptedWords: string[];
+	/** 목록이 돌아가지 않음 (정규식 원문) */
+	noLoopPatterns: string[];
 }
 
 export const DEFAULT_OPERATION_OPTIONS: OperationOptions = {
@@ -41,7 +45,8 @@ export const DEFAULT_OPERATION_OPTIONS: OperationOptions = {
 	},
 	closeWords: ['닫힘', '닫힌다', '닫혀', '닫기'],
 	interruptWords: ['입력이 발생하더라도', '입력이 있더라도', '입력하더라도', '입력 시에도'],
-	uninterruptedWords: ['중단되지 않', '멈추지 않', '취소되지 않']
+	uninterruptedWords: ['중단되지 않', '멈추지 않', '취소되지 않'],
+	noLoopPatterns: ['루프\\s*(?:되지|하지)\\s*않', '순환\\s*(?:되지|하지)\\s*않', '처음으로\\s*돌아가지\\s*않']
 };
 
 /** 조작 문장 하나의 키 순서와 결과. 정하지 못하면 null */
@@ -52,6 +57,9 @@ export function parseOperation(
 	const t = text.replace(/\s+/g, ' ').trim();
 	if (options.interruptWords.some((w) => t.includes(w)) && options.uninterruptedWords.some((w) => t.includes(w))) {
 		return { keys: [], result: 'uninterrupted', reason: '앞 조작 중 끼어드는 입력에도 끝까지 감' };
+	}
+	if (options.noLoopPatterns.some((p) => new RegExp(p).test(t))) {
+		return { keys: [], result: 'no-loop', reason: '목록 끝에서 반대쪽 끝으로 돌아가지 않음' };
 	}
 	if (!options.closeWords.some((w) => t.includes(w))) return null;
 	const found: { at: number; key: SpecKey }[] = [];

@@ -17,6 +17,10 @@ describe('parseOperation', () => {
 		});
 	});
 
+	it('"항목 루프되지 않음"은 목록 끝에서 돌아가지 않는지', () => {
+		expect(parseOperation('항목 루프되지 않음')?.result).toBe('no-loop');
+	});
+
 	it('키 낱말이 없거나 결과를 모르면 정하지 않는다', () => {
 		expect(parseOperation('팝업 외 영역 선택 시 팝업 닫힘')).toBeNull();
 		expect(parseOperation('확인 버튼 선택 시 저장')).toBeNull();

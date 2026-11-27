@@ -435,6 +435,53 @@ async function checkOperation(
 			? res(clause, check, 'pass', `${label} → ${screen} 화면 닫힘 (포커스 ${focusText(now)})`)
 			: res(clause, check, 'fail', `${label} 뒤에도 ${screen} 화면이 닫히지 않음 (포커스 ${focusText(now)})`);
 	}
+	if (op.result === 'no-loop') {
+		// 첫 항목에서 이전 키, 끝 항목에서 다음 키를 눌러 반대쪽 끝으로 가지 않는지 (끝까지 가는 키 수는 탐색 예산 안에서)
+		ctx.live.phase('목록 루프 확인 중');
+		const actions = ctx.keyMaps?.get(screen) ?? [];
+		const prevKey = listPrevKey(actions, no) ?? 'LEFT';
+		const nextKey = listNextKey(actions, no) ?? 'RIGHT';
+		const element = ctx.registry.callout(screen, no) ?? '';
+		const start = target(await runner.session.observe(), element);
+		const count = start?.itemCount ?? 0;
+		if (count <= 1) return res(clause, check, null, `${element} 항목이 ${count}개라 루프를 확인할 수 없음`);
+		const press = async (key: RemoteKey): Promise<Observation> => {
+			const r = await runner.session.press(key, false);
+			record(trail, { key, focus: focusText(r.obs), stable: r.stable }, '    루프 ');
+			return r.obs;
+		};
+		const atFirst = target(await press(prevKey), element);
+		if (atFirst?.hasFocus === true && atFirst.focusItem === count - 1)
+			return res(
+				clause,
+				check,
+				'fail',
+				`첫 항목에서 ${KEY_LABEL[prevKey] ?? prevKey} → 마지막 항목 [${count - 1}]로 돌아감`
+			);
+		if (count - 1 > ctx.timing.maxSearchKeys * 3)
+			return res(
+				clause,
+				check,
+				'pass',
+				`첫 항목에서 ${KEY_LABEL[prevKey] ?? prevKey} → 마지막으로 가지 않음 (끝 쪽은 항목 ${count}개라 확인 안 함)`
+			);
+		const back = await runner.reach(screen, no, trail);
+		if (back !== null) return res(clause, check, 'needs-review', back.reason);
+		let o = await runner.session.observe();
+		for (let i = 0; i < count - 1 && target(o, element)?.hasFocus === true; i++) o = await press(nextKey);
+		const last = target(o, element);
+		if (last?.hasFocus !== true || last.focusItem !== count - 1)
+			return res(clause, check, 'needs-review', `끝 항목까지 가지 못함 (포커스 ${focusText(o)})`);
+		const after = target(await press(nextKey), element);
+		return after?.hasFocus === true && after.focusItem === 0
+			? res(clause, check, 'fail', `끝 항목에서 ${KEY_LABEL[nextKey] ?? nextKey} → 첫 항목 [0]으로 돌아감`)
+			: res(
+					clause,
+					check,
+					'pass',
+					`양 끝에서 ${KEY_LABEL[prevKey] ?? prevKey}·${KEY_LABEL[nextKey] ?? nextKey} → 반대쪽 끝으로 가지 않음 (항목 ${count}개)`
+				);
+	}
 	// uninterrupted
 	const interrupt = noopKey === null ? undefined : KEY_OF[noopKey];
 	if (interrupt === undefined)

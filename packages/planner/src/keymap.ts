@@ -35,6 +35,8 @@ export type KeyEffect =
 	| { kind: 'leave'; to: string }
 	/** 같은 목록 안의 다음(+1)·이전(-1) 항목. item은 문장에 적힌 항목 이름 */
 	| { kind: 'step'; delta: 1 | -1; item: string | null }
+	/** 같은 목록(그리드) 안 아래(+1)·위(-1) 줄 항목 ("아래 콘텐츠로 이동") */
+	| { kind: 'row'; delta: 1 | -1 }
 	/** 다른 콜아웃으로. memory: 이동한 이력이 있으면 마지막 위치로 */
 	| { kind: 'move'; to: string; position: 'first' | 'last'; item: string | null; memory: boolean }
 	/** 콜아웃이 아닌 요소(또는 이름을 콜아웃에 대응시키지 못함) */
@@ -58,6 +60,12 @@ export interface KeyMapOptions {
 	leave: { pattern: string; to: string }[];
 	nextWords: string[];
 	prevWords: string[];
+	/**
+	 * 같은 목록 안 옆·아래 항목: 키 방향과 같은 방향 낱말 + 항목 낱말 ("[►] 우측 콘텐츠로 이동", "[▼] 아래 콘텐츠로 이동").
+	 * 좌우는 이전·다음 항목, 위아래는 위·아래 줄 항목. 방향이 키와 다르면("[▼] 좌측 상단 첫 번째 콘텐츠") 쓰지 않는다
+	 */
+	directionWords: Record<'up' | 'down' | 'left' | 'right', string[]>;
+	itemWords: string[];
 	lastWords: string[];
 	memoryWords: string[];
 	/**
@@ -95,6 +103,13 @@ export const DEFAULT_KEYMAP_OPTIONS: KeyMapOptions = {
 	],
 	nextWords: ['다음'],
 	prevWords: ['이전'],
+	directionWords: {
+		up: ['위쪽', '위', '상단'],
+		down: ['아래쪽', '아래', '하단'],
+		left: ['왼쪽', '좌측'],
+		right: ['오른쪽', '우측']
+	},
+	itemWords: ['콘텐츠', '항목', '아이템', '카드', '썸네일'],
 	lastWords: ['마지막'],
 	memoryWords: ['이동한 이력', '이력이 있을'],
 	lastFocusWords: [
@@ -327,6 +342,18 @@ export function parseKeyAction(
 		return done({ kind: 'step', delta, item: null }, `"${first}" → 같은 목록 ${delta > 0 ? '다음' : '이전'} 항목`);
 	}
 
+	if (key === 'up' || key === 'down' || key === 'left' || key === 'right') {
+		const dir = [...options.directionWords[key]].sort((a, b) => b.length - a.length);
+		const nouns = [...options.itemWords].sort((a, b) => b.length - a.length);
+		const rel = new RegExp(`^(?:${dir.map(escapeRegExp).join('|')})\\s*(?:${nouns.map(escapeRegExp).join('|')})`);
+		if (rel.test(main)) {
+			const delta = key === 'down' || key === 'right' ? 1 : -1;
+			return key === 'left' || key === 'right'
+				? done({ kind: 'step', delta, item: null }, `"${main}" → 같은 목록 ${delta > 0 ? '다음' : '이전'} 항목`)
+				: done({ kind: 'row', delta }, `"${main}" → 같은 목록 ${delta > 0 ? '아래' : '위'} 줄 항목`);
+		}
+	}
+
 	const others = callouts.filter((c) => c.no !== from.no);
 	const position: 'first' | 'last' = hasAny(main, options.lastWords) ? 'last' : 'first';
 	const quoted = [...main.matchAll(BALANCED)].map((m) => normalize(m[1] ?? '')).filter((q) => q !== '');
@@ -429,6 +456,8 @@ export function describeEffect(effect: KeyEffect): string {
 			return `leave:${effect.to}`;
 		case 'step':
 			return effect.delta > 0 ? 'next' : 'prev';
+		case 'row':
+			return effect.delta > 0 ? 'row-next' : 'row-prev';
 		case 'move':
 			return `move:${effect.to}:${effect.item === null ? effect.position : `item=${effect.item.toLowerCase()}`}${effect.memory ? '+memory' : ''}`;
 		case 'element':
