@@ -397,3 +397,53 @@ describe('영역 이름·같은 점수 후보', () => {
 		expect(link?.reason).toContain('같은 점수 후보를 모두 담은 요소');
 	});
 });
+
+describe('Enact 목록 꼴 (스크롤 칸·항목 칸으로 여러 번 감쌈)', () => {
+	/**
+	 * 0 body, 1 패널, 2 탭 묶음(spotlight) > 3 스크롤 > 4 안쪽 > 5 줄 > 6~8 탭,
+	 * 9 결과 묶음(spotlight, 화면의 79%) > 10 격자 > 11~14 항목 칸(클래스 없음) > 15~18 카드 > 19 썸네일
+	 */
+	const PAGE = snap([
+		{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+		{ parent: 0, rect: r(0, 0, 1920, 1080) },
+		{ parent: 1, spotlightId: 'result-categories', container: true, rect: r(0, 182, 1920, 124) },
+		{ parent: 2, classes: ['Scroller_scroller'], rect: r(0, 190, 1920, 100) },
+		{ parent: 3, classes: ['Scroller_content'], rect: r(0, 194, 1920, 80) },
+		{ parent: 4, classes: ['CategoryBar_row'], rect: r(0, 198, 1920, 64) },
+		...['All', 'Flights', 'Hotels'].map((t, k) => ({
+			parent: 5,
+			classes: ['CategoryBar_btn', 'spottable'],
+			ownText: t,
+			focusable: true,
+			rect: r(180 + k * 220, 198, 200, 64)
+		})),
+		{ parent: 1, spotlightId: 'result-container', container: true, rect: r(0, 198 + 108, 1920, 852 - 108) },
+		{ parent: 9, classes: ['VirtualGrid_list'], rect: r(150, 320, 1620, 700) },
+		...[0, 1, 2, 3].map((k) => ({ parent: 10, rect: r(180 + k * 400, 340, 380, 300) })),
+		...[0, 1, 2, 3].map((k) => ({
+			parent: 11 + k,
+			classes: ['ContentCard_card', 'spottable'],
+			spotlightId: `grid-item-${k}`,
+			focusable: true,
+			rect: r(180 + k * 400, 340, 380, 300)
+		})),
+		{ parent: 15, classes: ['ContentCard_thumbnail'], rect: r(190, 350, 360, 200) }
+	]);
+	const linkOne = (c: NavCallout): ReturnType<typeof linkScreenToApp>['callouts'][number] | undefined =>
+		linkScreenToApp({ ...NAV, callouts: [c] }, PAGE).callouts[0];
+
+	it('목록으로 넓힐 때 같은 항목만 담은 포커스 묶음까지 여러 단계 올라간다', () => {
+		const link = linkOne(callout('2', '카테고리 필터 영역', ['All'], r(175, 195, 210, 70), { right: '다음 탭' }));
+		expect(link?.best?.node).toBe(2);
+		expect(link?.selector?.selector).toBe('[data-spotlight-id="result-categories"]');
+	});
+
+	it('항목 칸으로 감싼 가상 격자도 항목 줄로 보고, 화면 대부분을 덮는 결과 묶음까지 넓힌다', () => {
+		const link = linkOne(callout('3', '', [], r(170, 330, 1600, 320), { down: '아래 줄' }));
+		expect(link?.best?.node).toBe(9);
+		expect(link?.selector).toMatchObject({
+			selector: '[data-spotlight-id="result-container"]',
+			items: '.ContentCard_card'
+		});
+	});
+});

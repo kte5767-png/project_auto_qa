@@ -129,7 +129,7 @@ import {
 	validateProfile
 } from './profile';
 import type { AppProfile, ElementRegistry } from './profile';
-import { DEFAULT_TIMING } from './scenario';
+import { DEFAULT_TIMING, parseCalloutRef } from './scenario';
 import type { ElementDef, Timing } from './scenario';
 
 const { values, positionals } = parseArgs({
@@ -1230,7 +1230,8 @@ class Runner {
 				session,
 				entryPath(ctx.profile, ctx.registry, screen),
 				trail,
-				ctx.profile.testData
+				ctx.profile.testData,
+				(name) => this.reachElement(session, name, trail)
 			);
 			if (e !== null) return e;
 			const shown = await session.until((o) => this.shown(o, screen), ctx.timing.readyTimeoutMs);
@@ -1405,7 +1406,20 @@ class Runner {
 		return this.tryReach(screen, no, trail);
 	}
 
-	private async tryReach(screen: string, no: string, trail: Trail[]): Promise<Miss | null> {
+	/** 진입 경로의 focus 단계: 콜아웃 요소로 포커스를 옮긴다 (진입 중인 화면 세션으로) */
+	private async reachElement(session: Session, name: string, trail: Trail[]): Promise<string | null> {
+		const ref = parseCalloutRef(this.ctx.registry.elements[name]?.callout ?? '');
+		if (ref === null) return `"${name}"는 콜아웃에 대응된 요소가 아니라 포커스를 옮길 길을 모름`;
+		const miss = await this.tryReach(ref.screen, ref.no, trail, session);
+		return miss === null ? null : miss.reason;
+	}
+
+	private async tryReach(
+		screen: string,
+		no: string,
+		trail: Trail[],
+		s: Session = this.session
+	): Promise<Miss | null> {
 		const { ctx } = this;
 		ctx.live.phase(`목표 ${calloutMark(no)} 찾아가는 중`);
 		const name = ctx.registry.callout(screen, no) ?? '';
@@ -1418,14 +1432,14 @@ class Runner {
 		const seen = new Set<string>();
 		let noRoute: string | null = null;
 		for (let round = 0; round <= ctx.timing.maxSearchKeys; round++) {
-			const obs = await this.session.observe();
+			const obs = await s.observe();
 			if (at(obs)) return null;
 			const here = focusText(obs);
 			if (seen.has(here)) break;
 			seen.add(here);
 			const inList = target(obs, name);
 			if (inList?.hasFocus === true && inList.focusItem > 0) {
-				for (let i = inList.focusItem; i > 0; i--) await this.step(prevKey, trail, '      길 ');
+				for (let i = inList.focusItem; i > 0; i--) await this.step(prevKey, trail, '      길 ', s);
 				continue;
 			}
 			const from = Object.keys(ctx.profile.screens[screen]?.callouts ?? {}).find(
@@ -1442,30 +1456,35 @@ class Runner {
 				);
 				if (route.ok) {
 					for (const key of route.keys)
-						await this.step(key, trail, `      길${route.estimated ? '(추정)' : ''} `);
+						await this.step(key, trail, `      길${route.estimated ? '(추정)' : ''} `, s);
 					continue;
 				}
 				noRoute = route.reason;
 			}
-			if (!(await this.searchStep(name, obs, trail))) break;
+			if (!(await this.searchStep(name, obs, trail, s))) break;
 		}
-		const obs = await this.session.observe();
+		const obs = await s.observe();
 		if (at(obs)) return null;
 		const why = `${noRoute === null ? '' : `이동 지도에 길 없음(${noRoute}), `}방향 탐색으로도 ${calloutMark(no)}에 가지 못함 (실제 ${focusText(obs)})`;
 		return { reason: why, again: false };
 	}
 
-	private async step(key: RemoteKey, trail: Trail[], label: string): Promise<Observation> {
-		const r = await this.session.press(key, false);
+	private async step(key: RemoteKey, trail: Trail[], label: string, s: Session = this.session): Promise<Observation> {
+		const r = await s.press(key, false);
 		record(trail, { key, focus: focusText(r.obs), stable: r.stable }, label);
 		return r.obs;
 	}
 
 	/** 목표 쪽으로 방향키 한 번 (주 축 먼저, 포커스가 안 움직이면 다른 축). 움직였으면 true */
-	private async searchStep(name: string, obs: Observation, trail: Trail[]): Promise<boolean> {
+	private async searchStep(
+		name: string,
+		obs: Observation,
+		trail: Trail[],
+		s: Session = this.session
+	): Promise<boolean> {
 		const t = target(obs, name);
 		if (obs.focus === null) return false;
-		if (t?.rect == null) return this.revealStep(name, obs, trail);
+		if (t?.rect == null) return this.revealStep(name, obs, trail, s);
 		const [fx, fy, fw, fh] = obs.focus.rect;
 		const [tx, ty, tw, th] = t.rect;
 		const dx = tx + tw / 2 - (fx + fw / 2);
@@ -1475,7 +1494,7 @@ class Runner {
 		const keys = Math.abs(dy) >= Math.abs(dx) ? [vertical, horizontal] : [horizontal, vertical];
 		const before = focusText(obs);
 		for (const key of keys) {
-			const after = await this.step(key, trail, '      탐색 ');
+			const after = await this.step(key, trail, '      탐색 ', s);
 			if (focusText(after) !== before) return true;
 		}
 		return false;
@@ -1485,7 +1504,12 @@ class Runner {
 	 * 목표가 화면에 안 보일 때(스크롤해야 나타남): 화면설계서 콜아웃 위치로 지금 포커스 콜아웃에서 목표 쪽 방향을 정하고,
 	 * 목표가 보이거나 포커스가 더 안 움직일 때까지 그 방향 키를 누른다 (최대 timing.maxRevealKeys). 보이게 됐으면 true
 	 */
-	private async revealStep(name: string, obs: Observation, trail: Trail[]): Promise<boolean> {
+	private async revealStep(
+		name: string,
+		obs: Observation,
+		trail: Trail[],
+		s: Session = this.session
+	): Promise<boolean> {
 		const { ctx } = this;
 		const def = ctx.registry.elements[name];
 		const [screen = '', no = ''] = (def?.callout ?? '').split('#');
@@ -1501,7 +1525,7 @@ class Runner {
 		const key: RemoteKey = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'DOWN' : 'UP') : dx > 0 ? 'RIGHT' : 'LEFT';
 		let last = focusText(obs);
 		for (let i = 0; i < ctx.timing.maxRevealKeys; i++) {
-			const after = await this.step(key, trail, '      찾기 ');
+			const after = await this.step(key, trail, '      찾기 ', s);
 			if ((target(after, name)?.visible ?? 0) > 0) return true;
 			const now = focusText(after);
 			if (now === last) return false;

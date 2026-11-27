@@ -51,6 +51,8 @@ export interface AppLinkOptions {
 	areaWords: string;
 	/** 목록으로 넓힌 뒤, 같은 항목만 담은 포커스 묶음(data-spotlight-container·spotlight id)까지 올라가 볼 단계 수 */
 	containerLift: number;
+	/** 목록으로 넓힐 때 넓힌 요소가 화면 넓이의 이 비율 이하일 때만 (결과 격자처럼 큰 목록은 되지만 화면 전체는 안 됨) */
+	maxLiftAreaRatio: number;
 	/** 다시 그릴 때 번호가 바뀌는 이름 (예: container-12) */
 	counterName: RegExp;
 }
@@ -70,7 +72,8 @@ export const DEFAULT_APP_LINK_OPTIONS: AppLinkOptions = {
 	minGroup: 2,
 	refineTop: 30,
 	areaWords: '영역|목록|리스트|탭|area|list|tabs?$',
-	containerLift: 2,
+	containerLift: 4,
+	maxLiftAreaRatio: 0.9,
 	stateClass:
 		/(^|[_-])(focus(ed)?|selected|active|pressed|hover(ed)?|checked|disabled|on|off)([_-]|$)|[a-z](Focus(ed)?|Selected|Active|Pressed|Hover(ed)?|Checked|Disabled)$|^spottable-next-/,
 	counterName: /(^|[-_])\d+$/
@@ -481,6 +484,15 @@ function refineCandidate(
 		node = inner;
 		notes.push('포커스 영역으로 좁힘');
 	}
+	// 포커스 가능 요소들을 담은 요소 → 같은 것만 담은 포커스 묶음(spotlight container·id)이 조금 위에 있으면 그것
+	if (snapshot.nodes[node]?.focusable !== true && (cache.focusables[node] ?? 0) > 0) {
+		const up = listContainer(snapshot, cache, node, options);
+		const upRect = snapshot.nodes[up]?.rect;
+		if (up !== node && upRect !== undefined && area(upRect) <= screenAreaOf(snapshot) * options.maxLiftAreaRatio) {
+			node = up;
+			notes.push('포커스 묶음으로 넓힘');
+		}
+	}
 	// 가장 가까운 포커스 가능 요소 (자신 또는 두 단계 위까지)
 	let item = node;
 	for (let k = 0; k < 2 && item >= 0 && snapshot.nodes[item]?.focusable !== true; k++) {
@@ -492,18 +504,41 @@ function refineCandidate(
 		// 같은 항목: 같은 부모 아래 태그·안정 클래스(상태 클래스 제외)가 모두 같은 형제 ("nav-item"만 같은 다른 버튼은 아님)
 		const sig = (n: DomNode): string => `${n.tag}|${stableClasses(n, options).sort().join(' ')}`;
 		const mine = sig(itemNode);
-		const group = (cache.children[itemNode.parent] ?? []).filter((m) => {
+		const sameItem = (m: number): boolean => {
 			const n = snapshot.nodes[m];
 			return n !== undefined && stableClasses(n, options).length > 0 && sig(n) === mine;
-		});
-		if (group.length >= options.minGroup) {
+		};
+		// 항목 칸: 가상 목록은 항목마다 칸(요소)으로 한 번 더 감싼다 → 포커스 가능 요소 하나만 담은 칸이면 칸끼리 형제를 본다
+		const onlyFocusable = (m: number): number | undefined => {
+			if ((cache.focusables[m] ?? 0) !== 1) return undefined;
+			return snapshot.nodes.find((n) => n.focusable && (n.i === m || isAncestorNode(snapshot, m, n.i)))?.i;
+		};
+		let unit = item;
+		let group: number[] = [];
+		for (let k = 0; k < 2; k++) {
+			const parent = snapshot.nodes[unit]?.parent ?? -1;
+			if (parent < 0) break;
+			const sibs = (cache.children[parent] ?? []).filter((m) => {
+				if (k === 0) return sameItem(m);
+				const f = onlyFocusable(m);
+				return f !== undefined && sameItem(f);
+			});
+			if (sibs.length >= options.minGroup) {
+				group = sibs;
+				break;
+			}
+			if ((cache.focusables[parent] ?? 0) !== 1) break;
+			unit = parent;
+		}
+		const groupParent = snapshot.nodes[group[0] ?? -1]?.parent ?? -1;
+		if (group.length >= options.minGroup && groupParent >= 0) {
 			const rects = group.map((m) => snapshot.nodes[m]?.rect).filter((r): r is Rect => r !== undefined);
 			const whole = iou(rect, unionRect(rects));
 			const named = callout.names.some((n) => new RegExp(options.areaWords, 'i').test(n));
-			const list = listContainer(snapshot, cache, itemNode.parent, options);
+			const list = listContainer(snapshot, cache, groupParent, options);
 			const listRect = snapshot.nodes[list]?.rect;
-			// 항목들을 감싼 요소가 없어 부모가 화면 전체에 가까우면 넓히지 않는다 (그때는 형제 묶음 후보가 목록이다)
-			const tight = listRect !== undefined && area(listRect) <= screenAreaOf(snapshot) * options.maxAreaRatio;
+			// 항목들을 감싼 요소가 없어 부모가 화면 전체이면 넓히지 않는다 (그때는 형제 묶음 후보가 목록이다)
+			const tight = listRect !== undefined && area(listRect) <= screenAreaOf(snapshot) * options.maxLiftAreaRatio;
 			if (tight && ((whole >= options.minGeometryIou && whole > iou(rect, itemNode.rect)) || named)) {
 				node = list;
 				notes.push(

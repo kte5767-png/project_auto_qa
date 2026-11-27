@@ -28,6 +28,11 @@ export type EntryStep =
 	| { waitFor: string; timeoutMs?: number }
 	| { waitFocus: true; timeoutMs?: number }
 	/**
+	 * 요소(콜아웃)로 포커스를 옮긴다: 이동 지도의 길 → 없으면 목표 쪽 방향 탐색 (D-043 ④ 자동 진입 경로).
+	 * TC 실행에서만 쓸 수 있다 (화면설계서 이동 지도가 필요)
+	 */
+	| { focus: string }
+	/**
 	 * 글자 입력 (D-043 ①): 포커스된 입력란에 넣는다. 값은 글자 그대로, `@no-result`, `@over-limit:N`, `@data:이름`
 	 * (`@auto-qa/planner` resolveTextValue). replace 기본 true(기존 글자를 지움), submit 기본 false(확인 안 보냄).
 	 * seed는 무작위 글자의 seed (프로필은 화면 번호를 넣는다)
@@ -146,6 +151,7 @@ export function validateScenario(data: unknown): string[] {
 				errors.push(`${where}: 모르는 키 ${String(step.else)}`);
 			if (step.until !== undefined) known(step.until, where);
 		} else if ('waitFor' in step) known(step.waitFor, where);
+		else if ('focus' in step) known(step.focus, where);
 		else if ('type' in step) {
 			const error = typeof step.type === 'string' ? textValueError(step.type) : '글자가 아님';
 			if (error !== null) errors.push(`${where}: ${error}`);

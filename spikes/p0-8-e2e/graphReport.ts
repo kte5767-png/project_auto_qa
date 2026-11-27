@@ -42,6 +42,9 @@ export function profileMoves(profile: AppProfile, registry: ElementRegistry): Pr
 					const e = registry.elements[until];
 					via = e?.callout === undefined ? null : parseCalloutRef(e.callout);
 				}
+			} else if ('focus' in step) {
+				until = registry.resolve(screen, step.focus);
+				back = false;
 			} else if ('type' in step) {
 				typed = step.type;
 				back = false;
@@ -69,6 +72,8 @@ export type GraphGrade =
 	| 'reference'
 	/** 이동 지도에 앞 화면 → 이 화면이 없음 */
 	| 'missing'
+	/** 이 화면이나 앞 화면이 화면설계서에 없음 (프로필에만 있는 화면) */
+	| 'not-in-spec'
 	/** 앱 첫 화면에서 바로 오는 길 (화면설계서에 없는 화면에서 옴) */
 	| 'root';
 
@@ -99,6 +104,10 @@ export function gradeGraph(graph: ScreenGraph, moves: readonly ProfileMove[]): G
 				: (graph.references.find((r) => r.from === move.from && r.to === move.screen) ?? null);
 		const unresolved = move.from === null ? [] : graph.unresolved.filter((u) => u.from === move.from);
 		const base = { screen: move.screen, move, edges, elsewhere, reference, unresolved };
+		const inSpec = (id: string): boolean => graph.screens.some((s) => s.id === id);
+		if (!inSpec(move.screen) || (move.from !== null && !inSpec(move.from))) {
+			return { ...base, grade: 'not-in-spec', actionDiffers: false, note: '화면설계서에 없는 화면 (채점 제외)' };
+		}
 		if (move.from === null) {
 			return { ...base, grade: 'root', actionDiffers: false, note: '앱 첫 화면에서 오는 길 (화면설계서 밖)' };
 		}
@@ -150,6 +159,7 @@ const GRADE_TEXT: Record<GraphGrade, string> = {
 	'other-callout': '다른 콜아웃',
 	reference: '참고(상태 변형)',
 	missing: '없음',
+	'not-in-spec': '화면설계서에 없음',
 	root: '첫 화면에서'
 };
 
@@ -170,7 +180,7 @@ export function summarizeGraph(graph: ScreenGraph, rows: readonly GraphRow[]): G
 	const count = (g: GraphGrade): number => rows.filter((r) => r.grade === g).length;
 	return {
 		screens: rows.length,
-		graded: rows.length - count('root'),
+		graded: rows.length - count('root') - count('not-in-spec'),
 		found: count('match') + count('screen-match') + count('reference'),
 		match: count('match'),
 		missing: count('missing'),
@@ -189,7 +199,9 @@ export function graphReportText(graph: ScreenGraph, rows: readonly GraphRow[], w
 		'# 화면 이동 지도 채점 (D-043 ④)',
 		'',
 		`이동 ${s.edges}개, 정하지 못한 이동 ${s.unresolved}개, 참고 ${s.references}개`,
-		`프로필 진입 경로 대비: 찾음 ${s.found}/${s.graded} (${pct}%), 콜아웃까지 일치 ${s.match}, 없음 ${s.missing} (첫 화면에서 오는 화면 ${s.screens - s.graded}개 제외)`,
+		`프로필 진입 경로 대비: 찾음 ${s.found}/${s.graded} (${pct}%), 콜아웃까지 일치 ${s.match}, 없음 ${s.missing} (첫 화면에서 오는 화면·화면설계서에 없는 화면 ${s.screens - s.graded}개 제외)`,
+		'',
+		`화면 제목${withText ? '' : ' (모양)'}: ${graph.screens.map((x) => `${x.id} "${shown(x.title ?? '')}"`).join(', ')}`,
 		'',
 		'## 화면별',
 		''
@@ -208,7 +220,7 @@ export function graphReportText(graph: ScreenGraph, rows: readonly GraphRow[], w
 		if (r.grade === 'missing')
 			for (const u of r.unresolved)
 				lines.push(
-					`  - 정하지 못함 ${u.from}${mark(u.callout)}: ${withText ? u.reason : reasonKind(u.reason)}${quote(u.text)}`
+					`  - 정하지 못함 ${u.from}${mark(u.callout)}: ${withText ? u.reason : reasonKind(u.reason)}`
 				);
 		if (r.reference !== null && withText && r.reference.condition !== null)
 			lines.push(`  - 진입 조건: "${r.reference.condition}"`);
@@ -220,9 +232,39 @@ export function graphReportText(graph: ScreenGraph, rows: readonly GraphRow[], w
 		);
 	}
 	for (const r of graph.references) lines.push(`- ${r.from}${mark(r.callout)} ⇢ ${r.to} (참고)${quote(r.text)}`);
-	for (const u of graph.unresolved)
-		lines.push(`- ${u.from}${mark(u.callout)} → ? (${withText ? u.reason : reasonKind(u.reason)})${quote(u.text)}`);
+	for (const u of graph.unresolved) {
+		const cands = u.candidates.map((x) => `${x.id} ${x.score}`).join(', ');
+		lines.push(
+			`- ${u.from}${mark(u.callout)} → ? (${withText ? u.reason : reasonKind(u.reason)})${u.name === null ? '' : ` 이름 "${shown(u.name)}"`}${cands === '' ? '' : ` 후보 ${cands}`}`,
+			`  - 문장${withText ? '' : ' (모양)'}: "${shown(u.text)}"`
+		);
+	}
 	return lines;
+
+	function shown(t: string): string {
+		return withText ? t : maskText(t);
+	}
+}
+
+/**
+ * 화면설계서 문장의 모양만 남긴다 (PC 밖으로 옮길 요약용): 한글 음절 → 가, 영문 → a/A, 숫자 → 0.
+ * 문형을 이루는 낱말(이동·페이지·선택 시·경우·참고 등)과 기호·띄어쓰기는 그대로 둔다
+ */
+export function maskText(text: string): string {
+	const keep =
+		/((?:이동|진입|호출|노출|전환|열림|닫힘|페이지|화면|팝업|레이어|경우|선택|입력|확인|참고|참조|없을|있을|없는|있는|결과|포커스|키보드)(?:으로|로|를|을|이|가|에서|에|한|된|할|하고)?)|(^|\s)(시|창|때|후|로|및)(?=\s|$|[,.:)])|./gu;
+	return text.replace(
+		keep,
+		(m: string, word: string | undefined, _pre: string | undefined, single: string | undefined) => {
+			if (word !== undefined) return word;
+			if (single !== undefined) return m;
+			if (/[가-힣]/u.test(m)) return '가';
+			if (/[A-Z]/.test(m)) return 'A';
+			if (/[a-z]/.test(m)) return 'a';
+			if (/[0-9]/.test(m)) return '0';
+			return m;
+		}
+	);
 }
 
 /** 정하지 못한 이유의 종류 (이름을 뺀 것) */

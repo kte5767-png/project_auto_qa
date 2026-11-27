@@ -1,7 +1,7 @@
 import { buildScreenGraph } from '@auto-qa/planner';
 import type { GraphCallout, GraphScreen } from '@auto-qa/planner';
 import { describe, expect, it } from 'vitest';
-import { gradeGraph, graphReportText, profileMoves, summarizeGraph } from './graphReport';
+import { gradeGraph, graphReportText, maskText, profileMoves, summarizeGraph } from './graphReport';
 import { buildRegistry } from './profile';
 import type { AppProfile } from './profile';
 
@@ -120,5 +120,27 @@ describe('gradeGraph', () => {
 		expect(masked).not.toContain('결과 없음 페이지로');
 		expect(masked).not.toContain('"찾기"');
 		expect(graphReportText(graph, rows).join('\n')).toContain('결과 없음 페이지로');
+	});
+});
+
+describe('maskText', () => {
+	it('문형 낱말·기호는 두고 나머지 글자는 모양만 남긴다', () => {
+		expect(maskText('선택한 단어가 입력된 찾기 결과 페이지로 이동 (#9.3 참고)')).toBe(
+			'선택한 가가가 입력된 가가 결과 페이지로 이동 (#0.0 참고)'
+		);
+		expect(maskText('Search Result 화면')).toBe('Aaaaaa Aaaaaa 화면');
+		expect(maskText('검색어 입력 후 확인 시')).toBe('가가가 입력 후 확인 시');
+	});
+});
+
+describe('화면설계서에 없는 화면', () => {
+	it('프로필에만 있는 화면은 채점에서 뺀다', () => {
+		const profile: AppProfile = {
+			...PROFILE,
+			screens: { ...PROFILE.screens, '9.9': screen('9.2', [{ press: 'OK' }]) }
+		};
+		const rows = gradeGraph(buildScreenGraph(SCREENS), profileMoves(profile, buildRegistry(profile)));
+		expect(rows.find((r) => r.screen === '9.9')?.grade).toBe('not-in-spec');
+		expect(summarizeGraph(buildScreenGraph(SCREENS), rows).graded).toBe(5);
 	});
 });

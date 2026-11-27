@@ -285,10 +285,16 @@ export async function runEntry(
 	session: Session,
 	entry: readonly EntryStep[],
 	trail: Trail[],
-	testData: Readonly<Record<string, string>> = {}
+	testData: Readonly<Record<string, string>> = {},
+	/** focus 단계: 요소로 포커스를 옮긴다 (TC 실행기가 이동 지도로). 못 가면 이유 */
+	reach?: (name: string) => Promise<string | null>
 ): Promise<string | null> {
 	for (const step of entry) {
-		if ('type' in step) {
+		if ('focus' in step) {
+			if (reach === undefined) return `"${step.focus}"로 포커스 옮기기(focus)는 TC 실행에서만 쓸 수 있음`;
+			const error = await reach(step.focus);
+			if (error !== null) return error;
+		} else if ('type' in step) {
 			const error = await typeEntry(session, step, trail, testData);
 			if (error !== null) return error;
 		} else if ('waitFocus' in step) {

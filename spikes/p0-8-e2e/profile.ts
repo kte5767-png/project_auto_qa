@@ -244,6 +244,7 @@ export function entryPath(profile: AppProfile, registry: ElementRegistry, screen
 				return step.until === undefined ? step : { ...step, until: registry.resolve(s, step.until) };
 			}
 			if ('waitFor' in step) return { ...step, waitFor: registry.resolve(s, step.waitFor) };
+			if ('focus' in step) return { focus: registry.resolve(s, step.focus) };
 			if ('type' in step) return { ...step, seed: step.seed ?? s };
 			return step;
 		})
@@ -302,6 +303,7 @@ export function validateProfile(data: unknown): string[] {
 					errors.push(`${at}: 모르는 키 ${String(step.else)}`);
 				if (step.until !== undefined) known(step.until, at);
 			} else if ('waitFor' in step) known(step.waitFor, at);
+			else if ('focus' in step) known(step.focus, at);
 			else if ('type' in step) {
 				const error = typeof step.type === 'string' ? textValueError(step.type) : '글자가 아님';
 				if (error !== null) errors.push(`${at}: ${error}`);

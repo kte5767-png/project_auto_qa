@@ -47,6 +47,10 @@ export interface UnresolvedMove {
 	callout: string;
 	text: string;
 	reason: string;
+	/** 문장에서 뽑은 대상 이름 (못 뽑았으면 null) */
+	name: string | null;
+	/** 이름 점수 상위 화면 (진단용) */
+	candidates: { id: string; score: number }[];
 }
 
 /**
@@ -152,6 +156,8 @@ function conditionOf(text: string, options: ScreenGraphOptions): string | null {
 const screenNames = (s: GraphScreen): string[] => (s.title === null ? [] : [s.title]);
 
 export interface ScreenGraph {
+	/** 화면설계서 화면 (번호·제목) */
+	screens: { id: string; title: string | null }[];
 	edges: ScreenEdge[];
 	unresolved: UnresolvedMove[];
 	references: ScreenReference[];
@@ -218,7 +224,12 @@ export function buildScreenGraph(
 					}
 					const name = placeName(text, options);
 					if (name === null) {
-						unresolved.push({ ...base, reason: '이동할 화면 이름을 찾지 못함' });
+						unresolved.push({
+							...base,
+							reason: '이동할 화면 이름을 찾지 못함',
+							name: null,
+							candidates: []
+						});
 						continue;
 					}
 					const scored = screens
@@ -232,12 +243,17 @@ export function buildScreenGraph(
 						}))
 						.sort((a, b) => b.score - a.score);
 					const [first, second] = scored;
+					const diag = {
+						name,
+						candidates: scored.slice(0, 3).map((x) => ({ id: x.id, score: round2(x.score) }))
+					};
 					if (first === undefined || first.score < options.minNameScore) {
-						unresolved.push({ ...base, reason: `"${name}"과 이름이 맞는 화면이 없음` });
+						unresolved.push({ ...base, reason: `"${name}"과 이름이 맞는 화면이 없음`, ...diag });
 					} else if (second !== undefined && first.score - second.score < options.nameMargin) {
 						unresolved.push({
 							...base,
-							reason: `"${name}" 화면을 하나로 정할 수 없음 (${first.id} ${first.score.toFixed(2)}, ${second.id} ${second.score.toFixed(2)})`
+							reason: `"${name}" 화면을 하나로 정할 수 없음 (${first.id} ${first.score.toFixed(2)}, ${second.id} ${second.score.toFixed(2)})`,
+							...diag
 						});
 					} else {
 						edges.push({ ...base, action, to: first.id, condition, how: 'name' });
@@ -246,5 +262,7 @@ export function buildScreenGraph(
 			}
 		}
 	}
-	return { edges, unresolved, references };
+	return { screens: screens.map((s) => ({ id: s.screenId, title: s.title })), edges, unresolved, references };
 }
+
+const round2 = (x: number): number => Math.round(x * 100) / 100;
