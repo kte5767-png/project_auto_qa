@@ -50,10 +50,7 @@ export function parseOperation(
 	options: OperationOptions = DEFAULT_OPERATION_OPTIONS
 ): OperationPlan | null {
 	const t = text.replace(/\s+/g, ' ').trim();
-	if (
-		options.interruptWords.some((w) => t.includes(w)) &&
-		options.uninterruptedWords.some((w) => t.includes(w))
-	) {
+	if (options.interruptWords.some((w) => t.includes(w)) && options.uninterruptedWords.some((w) => t.includes(w))) {
 		return { keys: [], result: 'uninterrupted', reason: '앞 조작 중 끼어드는 입력에도 끝까지 감' };
 	}
 	if (!options.closeWords.some((w) => t.includes(w))) return null;
