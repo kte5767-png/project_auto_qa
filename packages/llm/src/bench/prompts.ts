@@ -94,7 +94,7 @@ function judgeUser(c: JudgeCase, imageCount: number): string {
 	if (o.focus !== undefined) lines.push(`- 포커스: ${o.focus}`);
 	if (o.texts !== undefined) lines.push(`- 보이는 글자: ${o.texts.length === 0 ? '(없음)' : o.texts.join(' | ')}`);
 	if (o.note !== undefined) lines.push(`- 메모: ${o.note}`);
-	if (imageCount > 0) lines.push(`- 첨부 이미지 ${imageCount}장: 확인할 영역만 잘라낸 TV 화면`);
+	if (imageCount > 0) lines.push(`- 첨부 이미지 ${imageCount}장: ${o.images ?? '확인할 영역만 잘라낸 TV 화면'}`);
 	return lines.join('\n');
 }
 

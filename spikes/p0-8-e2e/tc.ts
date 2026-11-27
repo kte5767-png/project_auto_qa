@@ -155,9 +155,13 @@ interface StepRun {
 		value?: string | number | null;
 		/** 코드가 잰 값 (보인 개수 등) */
 		observed?: number;
+		/** 이 조건을 본 화면 (shots 이름). 없으면 진입 화면(screenshot) */
+		shots?: string[];
 	}[];
 	trail: Trail[];
 	screenshot: string | null;
+	/** 조작 전후 화면 (AI 검토용, D-045): 이름 → 파일. 예: { "ok-before": "Search-34-ok-before.png", "ok-after": … } */
+	shots?: Record<string, string>;
 	ms: number;
 }
 
@@ -1494,6 +1498,12 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 
 	const screenshot = `${c.sheet}-${s.row}.png`;
 	await writeFile(join(outDir, screenshot), await runner.session.driver.screenshot());
+	const shots: Record<string, string> = {};
+	const shoot = async (name: string): Promise<void> => {
+		const file = `${c.sheet}-${s.row}-${name}.png`;
+		await writeFile(join(outDir, file), await runner.session.driver.screenshot());
+		shots[name] = file;
+	};
 
 	for (const { clause, check } of motionChecks)
 		results.push(await checkMotion(runner, screen, no, element, t, clause, check, trail));
@@ -1576,6 +1586,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	}
 
 	// 선택 시: 목표에서 OK 한 번을 누르고 결과(화면 전환·나타난 것·포커스·변화 없음)를 함께 본다
+	const okStart = results.length;
 	if (okChecks.length > 0) {
 		const miss = blocked !== null ? { reason: blocked, again: false } : await runner.reach(screen, no, trail);
 		if (miss !== null) {
@@ -1583,6 +1594,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		} else {
 			ctx.live.phase('선택(OK) 결과 확인 중');
 			const before = await runner.session.observe();
+			await shoot('ok-before');
 			const r = await runner.session.press('OK');
 			record(trail, { key: 'OK', focus: focusText(r.obs), stable: r.stable }, '    ');
 			// 화면 전환은 늦게 시작하거나 로딩이 끝나야 보인다: 다른 화면이 나타나거나, 포커스가 이 화면 콜아웃을 벗어나거나,
@@ -1600,6 +1612,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 							(o) => moved(o) && o.focus !== null && !runner.session.loading(o),
 							ctx.timing.transitionWaitMs
 						)) ?? (await runner.session.observe()));
+			await shoot('ok-after');
 			// 이 화면을 벗어났는가 (프로필에 없는 화면 — 재생·다른 시트의 상세 페이지 — 으로 간 경우)
 			const left = !runner.inScreen(after, screen);
 			// 같은 패널 안에서 바뀌는 화면(4.6 결과 없음 → 4.5 결과)은 패널이 그대로 보여 "새로 나타남"으로 알 수 없다.
@@ -1718,6 +1731,8 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		}
 	}
 
+	const okEnd = results.length;
+
 	for (const { clause, check, op } of opChecks) {
 		const noop = keyChecks.find(({ clause: k }) => /동작\s*없음/.test(k.text))?.check.value;
 		results.push(
@@ -1733,7 +1748,10 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		status: v.verdict,
 		explanation: v.explanation,
 		basis: v.basis,
-		results: results.map((r) => ({
+		results: results.map((r, i) => ({
+			...(i >= okStart && i < okEnd && shots['ok-after'] !== undefined
+				? { shots: ['ok-before', 'ok-after'] }
+				: {}),
 			clause: r.clause.text,
 			kind: r.check.kind,
 			oracle: r.oracle,
@@ -1744,6 +1762,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		})),
 		trail,
 		screenshot,
+		...(Object.keys(shots).length === 0 ? {} : { shots }),
 		ms: Date.now() - started
 	};
 }

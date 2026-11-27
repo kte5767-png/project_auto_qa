@@ -164,6 +164,19 @@ pnpm spike:tc-run --score spikes/p0-8-e2e/out/tc-<시각>/result.json --mutation
 
 검출 = 바꾼 조건이 Fail, 놓침 = 바꾼 조건이 Pass(틀린 Pass, 가장 위험), 판정 못 함 = 확인 불가·확인 필요·미실행. 키 줄 아래 조건 줄(" / …")은 함께 지웁니다(남으면 바꾼 뜻이 되돌려질 수 있음).
 
+### AI 검토 (로컬 비전 모델, D-045)
+
+실행이 끝난 뒤 따로 돌립니다(테스트 중에는 PC 메모리가 모자람). 코드가 정하지 못한 조건(확인 필요)을 화면과 함께 로컬 모델(Ollama)에 묻고 의견을 붙입니다. OK를 누르는 조건은 OK 전후 화면 2장(`<단계>-ok-before.png`, `-ok-after.png`), 나머지는 진입 화면 1장을 줍니다. **AI 혼자 본 결과는 Pass로 확정하지 않고 확인 필요 그대로 둡니다**(2026-11-27 결정). `result.json`·TC 파일은 바꾸지 않습니다.
+
+```bash
+pnpm spike:tc-ai spikes/p0-8-e2e/out/tc-<시각> [--model gemma4:e4b]
+pnpm spike:tc-ai spikes/p0-8-e2e/out/tc-<시각> --shadow                              # 코드가 판정한 조건도 물어 비교
+pnpm spike:tc-ai spikes/p0-8-e2e/out/tc-<시각> --mutations <틀린 TC>.mutations.json   # 틀린 TC로 바꾼 조건을 AI가 잡는지
+pnpm spike:tc-ai spikes/p0-8-e2e/out/tc-<시각> --fake                                # Ollama 없이 흐름만
+```
+
+결과: `ai-review.md`, `ai-review.json`. Pass 허용으로 넘어갈지 정할 수: **코드 Fail인데 AI Pass**(틀린 Pass)와 틀린 TC로 바꾼 조건을 AI가 Fail로 잡은 비율.
+
 ### 막힌 곳 (층별)
 
 `report.md`와 콘솔 끝에 Pass가 아닌 단계를 어디서 막혔는지로 나눠 셉니다: 콜아웃 표시 없는 단계 · 진입 경로 없음 · 요소 대응 없음 · 진입 실패(환경·데이터) · TV에서만 확인 · 검사 종류 없음 · 문장 해석 애매 · Fail. 일치율을 올릴 곳을 층별로 보기 위한 집계이고 판정과는 무관합니다.

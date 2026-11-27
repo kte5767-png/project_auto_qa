@@ -301,6 +301,9 @@ importers:
       '@auto-qa/judge':
         specifier: workspace:*
         version: link:../../packages/judge
+      '@auto-qa/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@auto-qa/planner':
         specifier: workspace:*
         version: link:../../packages/planner

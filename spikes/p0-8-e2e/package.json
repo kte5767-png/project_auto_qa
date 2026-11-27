@@ -8,7 +8,8 @@
 		"start": "tsx run.ts",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"tc": "tsx tc.ts",
-		"mutate": "tsx mutate.ts"
+		"mutate": "tsx mutate.ts",
+		"ai": "tsx ai-review.ts"
 	},
 	"dependencies": {
 		"@auto-qa/browser": "workspace:*",
@@ -16,6 +17,7 @@
 		"@auto-qa/figma": "workspace:*",
 		"@auto-qa/focus": "workspace:*",
 		"@auto-qa/judge": "workspace:*",
+		"@auto-qa/llm": "workspace:*",
 		"@auto-qa/planner": "workspace:*",
 		"@auto-qa/spec": "workspace:*",
 		"@auto-qa/tc": "workspace:*"

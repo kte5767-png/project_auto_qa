@@ -26,7 +26,14 @@ export interface JudgeCase {
 	title?: string;
 	/** TC 기대 결과 */
 	expected: string;
-	observation: { screen?: string; focus?: string; texts?: string[]; note?: string };
+	observation: {
+		screen?: string;
+		focus?: string;
+		texts?: string[];
+		note?: string;
+		/** 첨부 이미지 설명 (없으면 "확인할 영역만 잘라낸 TV 화면") */
+		images?: string;
+	};
 	/** 확인 영역만 잘라낸 화면 (케이스 파일 기준 상대 경로) */
 	images?: string[];
 	answer: { verdict: Verdict };
