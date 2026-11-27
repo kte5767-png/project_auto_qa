@@ -14,13 +14,15 @@ import type { Observation, ObserveTarget, ObservedTarget } from '@auto-qa/focus'
 import type { Check, CheckKind, CheckResult, Verdict } from '@auto-qa/judge';
 import {
 	buildKeyMap,
+	describeEffect,
 	expectAfterKey,
 	expectedItemIndex,
 	matchByName,
 	navScreenFromSpec,
+	overrideKeyTexts,
 	resolveTextValue
 } from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions } from '@auto-qa/planner';
+import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
 import { extractSpecScreen, mergeSpecScreens } from '@auto-qa/spec';
 import type { SpecKey, SpecScreen } from '@auto-qa/spec';
 import { parseCalloutRef } from './scenario';
@@ -57,8 +59,8 @@ export async function jsonFiles(paths: readonly string[], cwd: string): Promise<
 	return out;
 }
 
-/** 화면설계서 내보내기 → 화면 번호별 이동 지도 */
-export async function loadKeyMaps(paths: readonly string[], options: KeyMapOptions): Promise<Map<string, KeyAction[]>> {
+/** 화면설계서 내보내기 → 화면 번호별 이동 지도 입력 (콜아웃 이름·위치·목업 글자·키 동작 문장) */
+export async function loadNavScreens(paths: readonly string[]): Promise<Map<string, NavScreen>> {
 	// 나눠 내보낸 파일(-p01of18…)을 한 폴더에서 읽는다. 같은 프레임을 다시 내보냈으면 나중 파일(이름순)을 쓴다
 	const frames = new Map<string, NormalizedFrame>();
 	for (const f of paths) {
@@ -67,11 +69,18 @@ export async function loadKeyMaps(paths: readonly string[], options: KeyMapOptio
 		}
 	}
 	const specs: SpecScreen[] = [...frames.values()].map((frame) => extractSpecScreen(frame));
-	const maps = new Map<string, KeyAction[]>();
+	const navs = new Map<string, NavScreen>();
 	for (const merged of mergeSpecScreens(specs)) {
 		const screen = navScreenFromSpec(merged, frames);
-		if (screen.screenId !== null) maps.set(screen.screenId, buildKeyMap(screen, options));
+		if (screen.screenId !== null) navs.set(screen.screenId, screen);
 	}
+	return navs;
+}
+
+/** 화면설계서 내보내기 → 화면 번호별 이동 지도 */
+export async function loadKeyMaps(paths: readonly string[], options: KeyMapOptions): Promise<Map<string, KeyAction[]>> {
+	const maps = new Map<string, KeyAction[]>();
+	for (const [id, screen] of await loadNavScreens(paths)) maps.set(id, buildKeyMap(screen, options));
 	return maps;
 }
 
@@ -353,6 +362,20 @@ export const result = (
 export interface SpecContext {
 	keyMaps: Map<string, KeyAction[]> | null;
 	options: KeyMapOptions;
+	/** 콜아웃 이름(화면설계서 + TC·프로필)·위치. 있으면 TC 문장으로 키 동작을 다시 해석할 수 있다 (D-046) */
+	navs?: ReadonlyMap<string, NavScreen>;
+	/**
+	 * 화면설계서 문장만으로 만든 이동 지도 (keyMaps에 TC 문장을 덮어 썼을 때, 화면설계서와 다른 곳을 설명에 남기는 데만 쓴다).
+	 * null이면 화면설계서가 없음
+	 */
+	specOnly?: ReadonlyMap<string, KeyAction[]> | null;
+}
+
+/** 확인하는 TC 단계의 키 동작 문장 (판정 기준, D-044·D-046): 그 화면·콜아웃에서 누른 키에만 쓴다 */
+export interface TcKeyTexts {
+	screen: string;
+	no: string;
+	texts: Partial<Record<SpecKey, string>>;
 }
 
 /**
@@ -367,12 +390,14 @@ export function checkSpecMove(
 	key: RemoteKey,
 	after: Observation,
 	remembered: ReadonlyMap<string, number>,
-	nameScope: Record<string, ElementDef> = elements
+	nameScope: Record<string, ElementDef> = elements,
+	tc: TcKeyTexts | null = null
 ): CheckResult {
-	const label = `[${KEY_LABEL[key]}] 화면설계서 이동`;
+	const label = `[${KEY_LABEL[key]}] ${tc === null ? '화면설계서' : 'TC'} 이동`;
 	const specKey = SPEC_KEY[key];
 	if (specKey === undefined) return result(label, 'key', null, `${KEY_LABEL[key]} 키는 이동 지도에 없음`);
-	if (spec.keyMaps === null) return result(label, 'key', null, '화면설계서가 주어지지 않음 (--spec)');
+	if (spec.keyMaps === null && (tc === null || spec.navs === undefined))
+		return result(label, 'key', null, '화면설계서가 주어지지 않음 (--spec)');
 
 	const entries = Object.entries(elements);
 	const from = entries.find(([name, e]) => e.callout !== undefined && target(before, name)?.hasFocus === true);
@@ -381,7 +406,27 @@ export function checkSpecMove(
 	}
 	const [fromName, fromDef] = from;
 	const ref = parseCalloutRef(fromDef.callout ?? '');
-	const actions = ref === null ? undefined : spec.keyMaps.get(ref.screen);
+	let actions = ref === null ? undefined : spec.keyMaps?.get(ref.screen);
+	// 판정 기준은 TC: 확인하는 콜아웃에서 누른 키면 TC 문장으로 다시 해석해 바꿔 끼운다. 화면설계서와 다르면 설명에 남긴다
+	let basisName = '화면설계서';
+	let specNote = '';
+	const nav = ref === null ? undefined : spec.navs?.get(ref.screen);
+	if (ref !== null && tc !== null && tc.screen === ref.screen && tc.no === ref.no && nav !== undefined) {
+		const o = overrideKeyTexts(actions ?? [], nav, ref.no, tc.texts, spec.options);
+		const mine = o.tc[specKey];
+		if (mine !== undefined) {
+			actions = o.actions;
+			basisName = 'TC';
+			const old =
+				spec.specOnly === undefined
+					? o.spec[specKey]
+					: spec.specOnly?.get(ref.screen)?.find((a) => a.from === ref.no && a.key === specKey);
+			if (spec.specOnly === null) specNote = '';
+			else if (old === undefined) specNote = ' — 화면설계서에는 이 키 동작이 없음';
+			else if (describeEffect(old.effect) !== describeEffect(mine.effect))
+				specNote = ` — 화면설계서는 "${old.text}"`;
+		}
+	}
 	if (ref === null || actions === undefined) {
 		return result(label, 'key', null, `화면설계서에 ${ref?.screen ?? '?'} 화면이 없음`);
 	}
@@ -391,8 +436,8 @@ export function checkSpecMove(
 			? { index: prev.focusItem, count: prev.itemCount }
 			: null;
 	const exp = expectAfterKey(actions, ref.no, specKey, position);
-	const clause = `${ref.screen} ${exp.basis}`;
-	if (!exp.ok) return result(clause, 'key', null, exp.reason);
+	const clause = `${ref.screen} ${basisName === 'TC' ? 'TC ' : ''}${exp.basis}`;
+	if (!exp.ok) return result(clause, 'key', null, `${exp.reason}${specNote}`);
 
 	let want: [string, ElementDef] | undefined;
 	if (exp.target.kind === 'same') want = from;
@@ -425,16 +470,16 @@ export function checkSpecMove(
 			clause,
 			'key',
 			'needs-review',
-			`키 방향으로 추정한 대상 ${wantText} / 실제 ${actual} — 사람 확인 필요`
+			`키 방향으로 추정한 대상 ${wantText} / 실제 ${actual} — 사람 확인 필요${specNote}`
 		);
 	}
 	return ok
-		? result(clause, 'key', 'pass', `${KEY_LABEL[key]} → ${actual} (화면설계서대로)`, wantName)
+		? result(clause, 'key', 'pass', `${KEY_LABEL[key]} → ${actual} (${basisName}대로${specNote})`, wantName)
 		: result(
 				clause,
 				'key',
 				'fail',
-				`${KEY_LABEL[key]} 후 포커스가 화면설계서와 다름: 기대 ${wantText} / 실제 ${actual}`
+				`${KEY_LABEL[key]} 후 포커스가 ${basisName}와 다름: 기대 ${wantText} / 실제 ${actual}${specNote}`
 			);
 }
 

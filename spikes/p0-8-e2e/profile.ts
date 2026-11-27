@@ -2,7 +2,7 @@ import { isRemoteKey } from '@auto-qa/core';
 import type { RemoteKey } from '@auto-qa/core';
 import { DEFAULT_HOME_MATCH, DEFAULT_RESET_RULES } from '@auto-qa/focus';
 import type { FingerprintOptions, HomeMatchOptions, ResetRules } from '@auto-qa/focus';
-import { textCandidates, textValueError } from '@auto-qa/planner';
+import { textValueError } from '@auto-qa/planner';
 import type { ElementDef, EntryStep, Timing } from './scenario';
 
 /**
@@ -244,12 +244,7 @@ export function entryPath(profile: AppProfile, registry: ElementRegistry, screen
 				return step.until === undefined ? step : { ...step, until: registry.resolve(s, step.until) };
 			}
 			if ('waitFor' in step) return { ...step, waitFor: registry.resolve(s, step.waitFor) };
-			if ('type' in step)
-				return {
-					...step,
-					seed: step.seed ?? s,
-					...(step.most === undefined ? {} : { most: registry.resolve(s, step.most) })
-				};
+			if ('type' in step) return { ...step, seed: step.seed ?? s };
 			return step;
 		})
 	);
@@ -310,13 +305,6 @@ export function validateProfile(data: unknown): string[] {
 			else if ('type' in step) {
 				const error = typeof step.type === 'string' ? textValueError(step.type) : '글자가 아님';
 				if (error !== null) errors.push(`${at}: ${error}`);
-				else if (textCandidates(step.type) !== null) {
-					// 결과가 가장 많은 글자: 확인(검색)을 보내야 결과가 나오고, 결과 항목 수를 셀 요소가 있어야 고를 수 있다
-					if (step.submit !== true) errors.push(`${at}: @most-results는 submit: true가 필요함`);
-					if (step.most === undefined)
-						errors.push(`${at}: @most-results는 결과를 셀 요소 most가 필요함 (예: "#3")`);
-					else known(step.most, at);
-				} else if (step.most !== undefined) errors.push(`${at}: most는 @most-results에서만 쓴다`);
 			}
 		});
 	}

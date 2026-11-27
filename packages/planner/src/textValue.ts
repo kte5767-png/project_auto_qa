@@ -7,11 +7,8 @@
  * - `"@over-limit:255"`: 글자 수 상한 + 1자. 몇 번째 글자인지 보이도록 숫자를 반복한다
  * - `"@data:이름"`: 프로필 테스트 데이터 — 화면설계서·TC로 정할 수 없고 앱 데이터를 알아야 하는 값
  *   (예: 항공권 결과가 나오는 검색어). 없으면 실행하지 않고 이유를 남긴다
- * - `"@most-results"`, `"@most-results:a,o,e"`: 후보 글자 중 결과가 가장 많이 나오는 것. 실행기가 후보마다 입력해
- *   결과 항목 수를 세고 `pickMostResults`로 고른다(같으면 앞 후보). 결과가 적으면 "전체" 필터·스크롤·맨 위로 버튼처럼
- *   결과가 많을 때만 보이는 것을 확인할 수 없어 오탐이 나므로 쓴다. 고르기 전에는 값이 없다
  */
-export type TextValueKind = 'literal' | 'no-result' | 'over-limit' | 'data' | 'most-results';
+export type TextValueKind = 'literal' | 'no-result' | 'over-limit' | 'data';
 
 export type TextValue = { value: string; kind: TextValueKind } | { error: string };
 
@@ -20,15 +17,9 @@ export interface TextValueContext {
 	seed: string;
 	/** 프로필 테스트 데이터 */
 	data: Readonly<Record<string, string>>;
-	/** 실행기가 이미 고른 값 (`@most-results` 글자 → 고른 후보) */
-	chosen?: Readonly<Record<string, string>>;
 }
 
 export const DEFAULT_NO_RESULT_LENGTH = 12;
-/** `@most-results` 기본 후보: 영문 한 글자 중 단어에 자주 들어가는 모음 (결과가 많이 나올 만한 검색어) */
-export const DEFAULT_RESULT_CANDIDATES: readonly string[] = ['a', 'o', 'e'];
-/** 후보가 많으면 실행이 길어지므로 상한을 둔다 (후보마다 한 번씩 입력·검색) */
-export const MAX_RESULT_CANDIDATES = 10;
 const MAX_GENERATED = 10_000;
 const CONSONANTS = 'bcdfghjklmnpqrstvwxz';
 
@@ -71,31 +62,6 @@ export function overLimitText(limit: number): string {
 	return '1234567890'.repeat(Math.ceil(length / 10)).slice(0, length);
 }
 
-/** `@most-results`의 후보 목록. 다른 값이면 null (형식이 틀려도 null — textValueError로 확인) */
-export function textCandidates(spec: string): string[] | null {
-	const m = TOKEN.exec(spec);
-	if (m?.[1] !== 'most-results') return null;
-	const arg = m[2];
-	if (arg === undefined) return [...DEFAULT_RESULT_CANDIDATES];
-	return arg.split(',').map((c) => c.trim());
-}
-
-export interface ResultTrial {
-	value: string;
-	/** 결과 항목 수. 결과 화면에 가지 못했으면 null */
-	count: number | null;
-}
-
-/** 결과가 가장 많은 후보 (같으면 앞 후보 — 재현성). 결과가 하나도 없으면 null */
-export function pickMostResults(trials: readonly ResultTrial[]): { value: string; count: number } | null {
-	let best: { value: string; count: number } | null = null;
-	for (const t of trials) {
-		if (t.count === null || t.count <= 0) continue;
-		if (best === null || t.count > best.count) best = { value: t.value, count: t.count };
-	}
-	return best;
-}
-
 /** 형식 오류. 정상이면 null (프로필 검사용) */
 export function textValueError(spec: string): string | null {
 	const m = TOKEN.exec(spec);
@@ -108,15 +74,7 @@ export function textValueError(spec: string): string | null {
 		return positiveInt(arg) !== null ? null : `@over-limit 뒤에 글자 수 상한이 필요함 (예: @over-limit:255)`;
 	}
 	if (name === 'data') return arg === undefined || arg === '' ? '@data 뒤에 테스트 데이터 이름이 필요함' : null;
-	if (name === 'most-results') {
-		const candidates = textCandidates(spec) ?? [];
-		if (candidates.some((c) => c === '')) return `@most-results 후보에 빈 글자가 있음: ${arg ?? ''}`;
-		if (candidates.length > MAX_RESULT_CANDIDATES)
-			return `@most-results 후보는 ${MAX_RESULT_CANDIDATES}개까지 (${candidates.length}개)`;
-		if (new Set(candidates).size !== candidates.length) return `@most-results 후보가 겹침: ${arg ?? ''}`;
-		return null;
-	}
-	return `모르는 글자 값 @${name ?? ''} (@no-result, @over-limit:N, @data:이름, @most-results)`;
+	return `모르는 글자 값 @${name ?? ''} (@no-result, @over-limit:N, @data:이름)`;
 }
 
 export function resolveTextValue(spec: string, context: TextValueContext): TextValue {
@@ -129,14 +87,6 @@ export function resolveTextValue(spec: string, context: TextValueContext): TextV
 		return { value: noResultText(context.seed, positiveInt(arg) ?? DEFAULT_NO_RESULT_LENGTH), kind: 'no-result' };
 	}
 	if (name === 'over-limit') return { value: overLimitText(positiveInt(arg) ?? 0), kind: 'over-limit' };
-	if (name === 'most-results') {
-		const chosen = context.chosen?.[spec];
-		return chosen === undefined
-			? {
-					error: `${spec}: 후보 중 결과가 가장 많은 글자를 아직 고르지 않음 (TC 실행기가 후보마다 검색해 고른다)`
-				}
-			: { value: chosen, kind: 'most-results' };
-	}
 	const key = arg ?? '';
 	const value = context.data[key];
 	return value === undefined || value === ''

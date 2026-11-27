@@ -33,12 +33,14 @@ import type { Check, CheckResult, Clause, StepVerdict, Verdict } from '@auto-qa/
 import {
 	DEFAULT_KEYMAP_OPTIONS,
 	DEFAULT_ROUTE_OPTIONS,
+	buildKeyMap,
 	nameScore,
-	pickMostResults,
+	overrideKeyTexts,
 	planRoute,
-	textCandidates
+	withCalloutNames
 } from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions, ResultTrial } from '@auto-qa/planner';
+import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
+import type { SpecKey } from '@auto-qa/spec';
 import {
 	listValuesAt,
 	normalize,
@@ -57,14 +59,14 @@ import {
 	checkSpecMove,
 	focusText,
 	jsonFiles,
-	loadKeyMaps,
+	loadNavScreens,
 	record,
 	runEntry,
 	stateChangeCount,
 	target,
 	viewOptions
 } from './common';
-import type { Trail } from './common';
+import type { TcKeyTexts, Trail } from './common';
 import {
 	PROFILE_FORMAT,
 	buildRegistry,
@@ -76,7 +78,7 @@ import {
 } from './profile';
 import type { AppProfile, ElementRegistry } from './profile';
 import { DEFAULT_TIMING } from './scenario';
-import type { ElementDef, EntryStep, Timing } from './scenario';
+import type { ElementDef, Timing } from './scenario';
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
@@ -153,6 +155,10 @@ interface Ctx {
 	pauseMs: number;
 	url: string;
 	keyMaps: Map<string, KeyAction[]> | null;
+	/** 화면설계서 문장만으로 만든 이동 지도 (TC와 다른 곳 설명용). null이면 화면설계서 없음 */
+	specKeyMaps: Map<string, KeyAction[]> | null;
+	/** 콜아웃 이름(화면설계서 + TC 단계 이름 + 프로필 이름)·위치. 키 동작을 TC 문장으로 해석할 때 쓴다 (D-046) */
+	navs: Map<string, NavScreen>;
 	options: KeyMapOptions;
 }
 
@@ -189,23 +195,6 @@ function listPrevKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 	return next === undefined ? null : (OPPOSITE[next.key] ?? null);
 }
 
-/** 진입 경로 글자 입력 @most-results를 고른 결과 (리포트용) */
-interface TextChoice {
-	/** 처음 고른 화면 */
-	screen: string;
-	spec: string;
-	/** 결과 항목 수를 센 요소 */
-	most: string;
-	/** 고른 값. 모든 후보가 결과 없음이면 null */
-	value: string | null;
-	trials: ResultTrial[];
-	/** 후보별 결과 수 요약, 또는 고르지 못한 이유 */
-	reason: string;
-}
-
-/** 같은 글자 값·같은 셀 요소면 같은 선택을 쓴다 */
-const choiceKey = (step: Extract<EntryStep, { type: string }>): string => `${step.type}|${step.most ?? ''}`;
-
 /**
  * 이름으로 가리킨 대상을 찾을 요소: 이 화면 요소 + 진입 경로 앞 화면의 콜아웃 중 누르기 전 화면에 보이던 것.
  * 4.3(최근 검색어가 있을 경우)의 "[▼] 추천 검색어 …"는 앞 화면 4.2의 추천 검색어를 가리킨다(Search!31).
@@ -214,6 +203,48 @@ const choiceKey = (step: Extract<EntryStep, { type: string }>): string => `${ste
 function nameScope(registry: ElementRegistry, screen: string, before: Observation): Record<string, ElementDef> {
 	const shown = Object.entries(registry.upstream(screen)).filter(([n]) => (target(before, n)?.visible ?? 0) > 0);
 	return { ...registry.scoped(screen), ...Object.fromEntries(shown) };
+}
+
+/**
+ * 화면·콜아웃 번호별 이름: TC 단계 이름("(6) Back to Top" → "Back to Top")과 앱 프로필 이름.
+ * TC 문장은 TC가 쓰는 이름으로 콜아웃을 부르므로(화면설계서 판에 설명이 없는 콜아웃 포함) 이것으로 대응시킨다
+ */
+function calloutNameTable(profile: AppProfile, cases: readonly TcCase[]): Map<string, Record<string, string[]>> {
+	const out = new Map<string, Record<string, string[]>>();
+	const add = (screen: string, no: string, names: readonly (string | undefined)[]): void => {
+		const table = out.get(screen) ?? {};
+		const list = table[no] ?? [];
+		for (const n of names) if (n !== undefined && n.trim() !== '' && !list.includes(n.trim())) list.push(n.trim());
+		table[no] = list;
+		out.set(screen, table);
+	};
+	for (const c of cases) {
+		const screen = c.specRef?.screenId;
+		if (screen == null) continue;
+		for (const st of c.steps) if (st.targetRef !== null) add(screen, st.targetRef.callout, [st.targetRef.label]);
+	}
+	for (const [screen, def] of Object.entries(profile.screens))
+		for (const [no, co] of Object.entries(def.callouts)) add(screen, no, [co.name, ...(co.names ?? [])]);
+	return out;
+}
+
+/** 화면·콜아웃 번호별 TC 키 동작 문장 ("[▼] …"). 같은 콜아웃이 여러 단계에 있으면 나중 단계 문장 */
+function tcKeyTable(cases: readonly TcCase[]): Map<string, Record<string, Partial<Record<SpecKey, string>>>> {
+	const out = new Map<string, Record<string, Partial<Record<SpecKey, string>>>>();
+	for (const c of cases) {
+		const screen = c.specRef?.screenId;
+		if (screen == null) continue;
+		for (const st of c.steps) {
+			if (st.targetRef === null) continue;
+			const table = out.get(screen) ?? {};
+			const texts = table[st.targetRef.callout] ?? {};
+			for (const clause of splitClauses(st.expected ?? ''))
+				if (clause.key !== null) texts[clause.key] = clause.text;
+			table[st.targetRef.callout] = texts;
+			out.set(screen, table);
+		}
+	}
+	return out;
 }
 
 class Runner {
@@ -235,11 +266,6 @@ class Runner {
 	readonly dynamic = new Set<string>();
 	/** 상태가 남아 앱을 다시 연 횟수 */
 	cleanRelaunches = 0;
-	/**
-	 * 진입 경로의 "결과가 가장 많은 글자"(@most-results)를 고른 결과 (글자 값|셀 요소 → 고른 값 또는 고르지 못한 이유).
-	 * 한 번 고르면 실행이 끝날 때까지 같은 값을 쓴다 (재현성)
-	 */
-	readonly choices = new Map<string, TextChoice>();
 
 	constructor(readonly ctx: Ctx) {
 		this.reset = resetConfig(ctx.profile);
@@ -400,8 +426,6 @@ class Runner {
 	async open(screen: string, trail: Trail[]): Promise<string | null> {
 		const { ctx } = this;
 		this.current = null;
-		const chosen = await this.chooseTexts(screen, trail);
-		if (chosen !== null) return chosen;
 		const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
 		if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
 		let session = this.newSession(screen);
@@ -410,7 +434,7 @@ class Runner {
 		const enter = async (): Promise<string | null> => {
 			const e = await runEntry(
 				session,
-				this.withChoices(entryPath(ctx.profile, ctx.registry, screen)),
+				entryPath(ctx.profile, ctx.registry, screen),
 				trail,
 				ctx.profile.testData
 			);
@@ -448,89 +472,6 @@ class Runner {
 			opened: this.opens,
 			freshAt: session.presses
 		};
-		return null;
-	}
-
-	/** 진입 경로의 @most-results 글자를 고른 값으로 바꾼다 (고르지 못한 것은 그대로 두어 입력 단계에서 이유가 남는다) */
-	private withChoices(path: readonly EntryStep[]): EntryStep[] {
-		return path.map((step) => {
-			if (!('type' in step)) return step;
-			const choice = this.choices.get(choiceKey(step));
-			return choice === undefined || choice.value === null ? step : { ...step, type: choice.value };
-		});
-	}
-
-	/**
-	 * 진입 경로에 "결과가 가장 많은 글자"(@most-results)가 있으면, 아직 고르지 않았을 때 후보마다 처음 화면부터 그 글자로
-	 * 진입해 결과 항목 수(most 요소)를 세고 가장 많은 것을 고른다 (같으면 앞 후보). 결과가 적으면 "전체" 필터·스크롤·맨 위로처럼
-	 * 결과가 많을 때만 있는 요소를 확인하지 못해 오탐이 나기 때문이다. 고르지 못하면 이유(진입 실패), 아니면 null
-	 */
-	private async chooseTexts(screen: string, trail: Trail[]): Promise<string | null> {
-		const { ctx } = this;
-		const path = entryPath(ctx.profile, ctx.registry, screen);
-		for (const [i, step] of path.entries()) {
-			if (!('type' in step)) continue;
-			const candidates = textCandidates(step.type);
-			if (candidates === null) continue;
-			const key = choiceKey(step);
-			const known = this.choices.get(key);
-			if (known !== undefined) {
-				if (known.value === null) return known.reason;
-				continue;
-			}
-			const most = step.most ?? '';
-			const trials: ResultTrial[] = [];
-			for (const value of candidates) {
-				const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
-				if (ready !== null || this.app === null) return ready ?? '앱을 열지 못함';
-				const session = this.newSession(screen);
-				record(trail, { key: null, focus: `글자 후보 "${value}" 시험 (결과 수 세기)`, stable: true }, '      ');
-				const steps = this.withChoices([...path.slice(0, i), { ...step, type: value }, ...path.slice(i + 1)]);
-				const error = await runEntry(session, steps, trail, ctx.profile.testData);
-				let count: number | null = null;
-				if (error === null) {
-					const obs = (await session.settle(ctx.timing.readyTimeoutMs)).obs;
-					count = target(obs, most)?.itemCount ?? 0;
-				}
-				trials.push({ value, count });
-				record(
-					trail,
-					{
-						key: null,
-						focus: `글자 후보 "${value}" → ${count === null ? `결과 화면에 못 감 (${error ?? ''})` : `${most} ${count}개`}`,
-						stable: true
-					},
-					'      '
-				);
-			}
-			const pick = pickMostResults(trials);
-			const summary = trials.map((t) => `"${t.value}" ${t.count === null ? '실패' : `${t.count}개`}`).join(' · ');
-			const choice: TextChoice =
-				pick === null
-					? {
-							screen,
-							spec: step.type,
-							most,
-							value: null,
-							trials,
-							reason: `글자 후보 ${candidates.join('·')} 모두 결과가 나오지 않음 (${summary})`
-						}
-					: { screen, spec: step.type, most, value: pick.value, trials, reason: summary };
-			this.choices.set(key, choice);
-			record(
-				trail,
-				{
-					key: null,
-					focus:
-						choice.value === null
-							? choice.reason
-							: `결과가 가장 많은 글자 "${choice.value}"로 진입 (${summary})`,
-					stable: true
-				},
-				'      '
-			);
-			if (choice.value === null) return choice.reason;
-		}
 		return null;
 	}
 
@@ -937,9 +878,17 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 
 	// 키 동작: 목표 첫 항목에서 키 하나씩. 누른 뒤에는 키로 목표에 돌아온다 (못 돌아오면 그때만 다시 연다)
 	let blocked: string | null = null;
+	// 판정 기준은 TC (D-044·D-046): 이 단계의 키 동작 문장으로 기대 위치를 정한다. 화면설계서는 이름·위치·길 찾기에만
+	const tcKeys: TcKeyTexts = {
+		screen,
+		no,
+		texts: Object.fromEntries(
+			keyChecks.flatMap(({ clause }) => (clause.key === null ? [] : [[clause.key, clause.text]]))
+		) as TcKeyTexts['texts']
+	};
 	for (const { clause, check } of keyChecks) {
-		if (ctx.keyMaps?.get(screen) === undefined) {
-			results.push(res(clause, check, null, `화면설계서에 ${screen} 이동 지도가 없어 키 동작을 비교할 수 없음`));
+		if (ctx.navs.get(screen) === undefined && ctx.keyMaps?.get(screen) === undefined) {
+			results.push(res(clause, check, null, `${screen} 콜아웃 정보가 없어 키 동작을 비교할 수 없음`));
 			continue;
 		}
 		if (blocked !== null) {
@@ -952,7 +901,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 			continue;
 		}
 		// 같은 화면·같은 출발(콜아웃 첫 항목)·같은 키는 결과가 같다고 보고 한 번만 실행 (이동 이력 조건은 실제 지나간 위치로 기대값을 계산)
-		const cacheKey = `${screen}|${no}|${key}`;
+		const cacheKey = `${screen}|${no}|${key}|${clause.text}`;
 		const cached = runner.moves.get(cacheKey);
 		if (cached !== undefined) {
 			results.push({ ...cached, clause, check });
@@ -979,12 +928,13 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 		record(trail, { key, focus: focusText(r.obs), stable: r.stable }, '    ');
 		const move = checkSpecMove(
 			ctx.registry.scoped(screen),
-			{ keyMaps: ctx.keyMaps, options: ctx.options },
+			{ keyMaps: ctx.keyMaps, options: ctx.options, navs: ctx.navs, specOnly: ctx.specKeyMaps },
 			before,
 			key,
 			r.obs,
 			remembered,
-			nameScope(ctx.registry, screen, before)
+			nameScope(ctx.registry, screen, before),
+			tcKeys
 		);
 		results.push({ ...move, clause, check });
 		runner.moves.set(cacheKey, move);
@@ -1197,14 +1147,7 @@ function scoreText(sc: Score): string[] {
 
 const cell = (t: string): string => t.replace(/\|/g, '\\|').replace(/\n/g, '<br>');
 
-function report(
-	profile: AppProfile,
-	url: string,
-	tcFile: string,
-	steps: readonly StepRun[],
-	sc: Score | null,
-	choices: readonly TextChoice[] = []
-): string {
+function report(profile: AppProfile, url: string, tcFile: string, steps: readonly StepRun[], sc: Score | null): string {
 	const count = (st: StepStatus): number => steps.filter((s) => s.status === st).length;
 	const all = steps.flatMap((s) => s.results);
 	const lines = [
@@ -1214,10 +1157,6 @@ function report(
 		`- 앱: ${url}`,
 		`- 단계 ${steps.length}개 — Pass ${count('pass')} · Fail ${count('fail')} · 확인 필요 ${count('needs-review')} · 미실행 ${count('not-run')}`,
 		`- 조건 ${all.length}개 — 코드 판정 ${all.filter((r) => r.oracle === 'code').length} · AI 대상 ${all.filter((r) => r.oracle === 'ai').length} · 확인 불가 ${all.filter((r) => r.oracle === 'none').length}`,
-		...choices.map(
-			(c) =>
-				`- 글자 입력 ${c.spec} (${c.screen}): ${c.value === null ? `고르지 못함 — ${c.reason}` : `"${c.value}" (${c.most} 결과 수 ${c.reason})`}`
-		),
 		''
 	];
 	if (sc !== null) lines.push('## 사람 판정과 비교', '', ...scoreText(sc).map((t) => `- ${t}`), '', ...sc.lines, '');
@@ -1349,8 +1288,8 @@ async function main(): Promise<void> {
 	const registry = buildRegistry(profile);
 	const options: KeyMapOptions = { ...DEFAULT_KEYMAP_OPTIONS, aliases: profile.aliases ?? {} };
 	const specFiles = await jsonFiles(values.spec, cwd);
-	const keyMaps = specFiles.length === 0 ? null : await loadKeyMaps(specFiles, options);
-	if (keyMaps !== null) console.log(`화면설계서 화면 ${keyMaps.size}개: ${[...keyMaps.keys()].join(', ')}`);
+	const specNavs = specFiles.length === 0 ? null : await loadNavScreens(specFiles);
+	if (specNavs !== null) console.log(`화면설계서 화면 ${specNavs.size}개: ${[...specNavs.keys()].join(', ')}`);
 
 	const tcPath = resolve(cwd, tcFile);
 	if (values.truth !== undefined && resolve(cwd, values.truth) === tcPath) {
@@ -1360,6 +1299,23 @@ async function main(): Promise<void> {
 	}
 	const grid = await readWorkbook(tcPath);
 	const cases = normalize(grid, suggestProfile(grid)).cases;
+	// 콜아웃 이름: 화면설계서 이름 + TC 단계 이름("(6) Back to Top") + 프로필 이름. TC 문장 속 이름을 콜아웃에 대응시킨다
+	const navs = new Map<string, NavScreen>();
+	for (const [screen, names] of calloutNameTable(profile, cases))
+		navs.set(screen, withCalloutNames(specNavs?.get(screen) ?? null, screen, names));
+	for (const [screen, nav] of specNavs ?? []) if (!navs.has(screen)) navs.set(screen, nav);
+	// 이동 지도(길 찾기): 화면설계서 키 동작에 TC 단계의 키 동작 문장을 덮어 쓴다 (판정 기준은 TC, D-046).
+	// 화면설계서에 이동 지도가 없는 화면(팝업 등)도 TC 문장으로 길을 찾는다
+	const tcKeys = tcKeyTable(cases);
+	const keyMaps = new Map<string, KeyAction[]>();
+	const specKeyMaps = specNavs === null ? null : new Map<string, KeyAction[]>();
+	for (const [screen, nav] of navs) {
+		let actions = buildKeyMap(nav, options);
+		if (specNavs?.has(screen) === true) specKeyMaps?.set(screen, actions);
+		for (const [no, texts] of Object.entries(tcKeys.get(screen) ?? {}))
+			actions = overrideKeyTexts(actions, nav, no, texts, options).actions;
+		keyMaps.set(screen, actions);
+	}
 	const only = values.only === undefined ? null : new Set(values.only.split(',').map((x) => x.trim()));
 	const prefix = values.screen;
 	const selected: [TcCase, TcStep][] = [];
@@ -1387,6 +1343,8 @@ async function main(): Promise<void> {
 		pauseMs,
 		url: values.url ?? profile.url,
 		keyMaps,
+		specKeyMaps,
+		navs,
 		options
 	};
 	const steps: StepRun[] = [];
@@ -1439,16 +1397,10 @@ async function main(): Promise<void> {
 	console.log(`\nTC 파일에 결과 쓰기 (${basename(tcPath)}):\n${await writeResults(tcPath, steps, values.overwrite)}`);
 	const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));
 	if (sc !== null) console.log(scoreText(sc).join('\n'));
-	const choices = [...runner.choices.values()];
-	for (const c of choices) {
-		console.log(
-			`글자 입력 ${c.spec}: ${c.value === null ? `고르지 못함 — ${c.reason}` : `"${c.value}" (${c.reason})`}`
-		);
-	}
-	await writeFile(join(out, 'report.md'), report(profile, ctx.url, basename(tcPath), steps, sc, choices));
+	await writeFile(join(out, 'report.md'), report(profile, ctx.url, basename(tcPath), steps, sc));
 	await writeFile(
 		join(out, 'result.json'),
-		`${JSON.stringify({ format: RESULT_FORMAT, version: 1, tc: basename(tcPath), url: ctx.url, choices, steps }, null, '\t')}\n`
+		`${JSON.stringify({ format: RESULT_FORMAT, version: 1, tc: basename(tcPath), url: ctx.url, steps }, null, '\t')}\n`
 	);
 	const count = (st: StepStatus): number => steps.filter((x) => x.status === st).length;
 	console.log(
