@@ -48,6 +48,8 @@ export interface RunRequest {
 	url: string;
 	headed: boolean;
 	overwrite: boolean;
+	/** 실제 webOS TV에서 실행 (tc.ts --device, .env의 WEBOS_* 설정) */
+	device?: boolean;
 }
 
 let live: Live | null = null;
@@ -268,7 +270,8 @@ function startRun(args: RunRequest): Live {
 		runId
 	];
 	if (args.url.trim() !== '') cli.push('--url', args.url.trim());
-	if (args.headed) cli.push('--headed');
+	if (args.device === true) cli.push('--device');
+	else if (args.headed) cli.push('--headed');
 	if (args.overwrite) cli.push('--overwrite');
 	// Windows에서 pnpm·npx는 .cmd라 셸로 띄운다. 인자는 따옴표로 감싼다.
 	// Windows 밖에서는 프로세스 묶음을 따로 만들어 중지할 때 아래 프로세스까지 끝낸다
@@ -340,6 +343,7 @@ export function autoQaApi(): Plugin {
 							url: '',
 							headed: true,
 							overwrite: false,
+							device: false,
 							...saved
 						});
 						return;

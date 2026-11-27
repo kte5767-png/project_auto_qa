@@ -17,9 +17,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { BrowserDriver, launchBrowser } from '@auto-qa/browser';
+import { launchBrowser } from '@auto-qa/browser';
 import { TextInputError, textFieldScript } from '@auto-qa/core';
-import type { RemoteKey, TextFieldState } from '@auto-qa/core';
+import type { Driver, RemoteKey, TextFieldState } from '@auto-qa/core';
 import {
 	addedItems,
 	compareMotion,
@@ -98,6 +98,8 @@ import {
 	viewOptions
 } from './common';
 import type { TcKeyTexts, Trail } from './common';
+import { BrowserHost, WebOsHost } from './host';
+import type { AppHost } from './host';
 import { DEFAULT_LIVE_OPTIONS, LiveReporter, isRunId } from './live';
 import {
 	PROFILE_FORMAT,
@@ -122,6 +124,10 @@ const { values, positionals } = parseArgs({
 		/** 이 단계만 (예: Search!9,Search!10) */
 		only: { type: 'string' },
 		url: { type: 'string' },
+		/** 실제 webOS TV에서 실행 (.env의 WEBOS_* 설정, 페어링 키는 .data/devices). 없으면 브라우저 시뮬레이터 */
+		device: { type: 'boolean', default: false },
+		/** TV 앱 ID (없으면 .env의 WEBOS_APP_ID) */
+		app: { type: 'string' },
 		headed: { type: 'boolean', default: false },
 		slow: { type: 'string' },
 		scale: { type: 'string', default: 'auto' },
@@ -141,6 +147,8 @@ const { values, positionals } = parseArgs({
 	}
 });
 const cwd = process.env['INIT_CWD'] ?? process.cwd();
+/** 저장소 루트 (.env·.data가 있는 곳) */
+const ROOT = resolve(import.meta.dirname, '../..');
 
 // ── 결과 모양 ───────────────────────────────────────────
 
@@ -200,7 +208,8 @@ const KEY_OF: Record<string, RemoteKey> = {
 // ── 화면 세션: 같은 화면 단계는 앱을 한 번만 연다 ──────────
 
 interface Ctx {
-	browser: Awaited<ReturnType<typeof launchBrowser>>;
+	/** 앱을 여는 곳 (브라우저 시뮬레이터 또는 TV) */
+	host: AppHost;
 	profile: AppProfile;
 	registry: ElementRegistry;
 	timing: Timing;
@@ -228,10 +237,12 @@ interface ScreenSession {
 
 /** 열려 있는 앱: 드라이버 하나를 계속 쓰고, 처음 화면 지문을 기억한다 (D-039) */
 interface AppSession {
-	driver: BrowserDriver;
+	driver: Driver;
 	home: ScreenFingerprint;
 	/** 실시간 화면 멈추기 */
 	stopView: (() => Promise<void>) | null;
+	/** 앱 닫기 (브라우저: 컨텍스트, TV: 연결은 둔다) */
+	close: () => Promise<void>;
 }
 
 /** 목표에 못 간 이유. again = 처음 화면부터 다시 가 보면 될 수 있음 */
@@ -995,32 +1006,34 @@ class Runner {
 		this.current = null;
 		if (this.app !== null) {
 			await this.app.stopView?.();
-			await this.app.driver.close();
+			await this.app.close();
 		}
 		this.app = null;
 	}
 
-	/** 앱을 새로 열고(새 브라우저 컨텍스트라 저장 상태도 새로) 준비되면 처음 화면 지문을 기억한다 */
+	/** 앱을 처음 상태로 열고(브라우저: 새 컨텍스트, TV: 저장소를 지우고 다시 열기) 준비되면 처음 화면 지문을 기억한다 */
 	private async launch(trail: Trail[]): Promise<string | null> {
 		await this.close();
 		const { ctx } = this;
 		this.opens++;
 		ctx.live.phase('앱 여는 중');
-		const driver = await BrowserDriver.open(ctx.browser, ctx.url);
+		const hosted = await ctx.host.launch();
+		const { driver } = hosted;
 		// 실시간 화면은 앱이 뜨는 동안부터 보낸다 (못 받아도 검수는 그대로)
-		const stopView = ctx.live.framesOn
-			? await driver.liveView((jpeg) => ctx.live.onFrame(jpeg)).catch(() => null)
-			: null;
+		const stopView =
+			ctx.live.framesOn && hosted.liveView !== null
+				? await hosted.liveView((jpeg) => ctx.live.onFrame(jpeg)).catch(() => null)
+				: null;
 		const probe = this.probe(driver);
 		// 스플래시·스켈레톤이 끝나고 포커스가 자리 잡은 뒤의 화면을 처음 화면으로 기억한다
 		const ready = await probe.settle(ctx.timing.readyTimeoutMs);
 		if (!ready.settled) {
 			await stopView?.();
-			await driver.close();
+			await hosted.close();
 			return '앱이 준비되지 않음 (포커스가 없거나 로딩 표시가 사라지지 않음)';
 		}
 		const home = await takeFingerprint(driver, this.reset.fingerprint);
-		this.app = { driver, home, stopView };
+		this.app = { driver, home, stopView, close: () => hosted.close() };
 		const layers = home.layers.length > 0 ? `, 겹친 층 ${home.layers.length}` : '';
 		record(
 			trail,
@@ -1054,7 +1067,7 @@ class Runner {
 	 * BACK으로 닫히지 않는 팝업에서 취소 버튼을 고른다: 지금 포커스 글자가 취소면 OK, 아니면 방향키를 하나씩 눌러 보며
 	 * 팝업 안에서 취소 글자 버튼을 찾는다. 나가기 글자 버튼에서는 OK를 누르지 않는다
 	 */
-	private async chooseCancel(driver: BrowserDriver, popup: ScreenFingerprint, trail: Trail[]): Promise<boolean> {
+	private async chooseCancel(driver: Driver, popup: ScreenFingerprint, trail: Trail[]): Promise<boolean> {
 		const probe = this.probe(driver);
 		const { cancelWords, exitWords } = this.reset;
 		const keys: RemoteKey[] = ['DOWN', 'RIGHT', 'UP', 'LEFT', 'DOWN', 'RIGHT'];
@@ -1239,7 +1252,7 @@ class Runner {
 	}
 
 	/** 요소 없이 포커스·로딩만 보는 세션 (앱 준비·되돌리기 대기용) */
-	private probe(driver: BrowserDriver): Session {
+	private probe(driver: Driver): Session {
 		const { ctx } = this;
 		return new Session(
 			driver,
@@ -2486,16 +2499,23 @@ async function main(): Promise<void> {
 		}),
 		{ ...DEFAULT_LIVE_OPTIONS, frameMs }
 	);
-	live.stage('preparing', '브라우저 여는 중');
+	live.stage('preparing', values.device ? 'TV 연결 중' : '브라우저 여는 중');
 	await live.flush();
 	onTrail(() => live.touch());
 
 	let completed = false;
 	try {
 		const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
-		const browser = await launchBrowser({ headless: !values.headed, windowScale });
+		const host: AppHost = values.device
+			? await WebOsHost.connect({
+					root: ROOT,
+					...(values.app === undefined ? {} : { appId: values.app }),
+					onPairingPrompt: () => console.log('  → TV 화면에 뜬 연결 요청에서 "허용"을 눌러 주세요')
+				})
+			: new BrowserHost(await launchBrowser({ headless: !values.headed, windowScale }), url);
+		if (values.device) console.log(`실행 환경: ${host.label}`);
 		const ctx: Ctx = {
-			browser,
+			host,
 			profile,
 			registry,
 			timing: { ...DEFAULT_TIMING, ...profile.timing },
@@ -2525,7 +2545,7 @@ async function main(): Promise<void> {
 		} finally {
 			live.stage('writing', '앱 닫는 중');
 			await runner.close();
-			await browser.close();
+			await host.close();
 		}
 		console.log(
 			`앱을 연 횟수: ${runner.opens} (남은 상태 때문에 ${runner.cleanRelaunches}) · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}` +

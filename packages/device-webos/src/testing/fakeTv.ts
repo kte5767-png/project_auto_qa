@@ -206,6 +206,17 @@ export async function startFakeInspector(options: FakeInspectorOptions = {}): Pr
 				reply({ data: Buffer.from('fake-image').toString('base64') });
 				return;
 			}
+			if (message.method === 'Page.startScreencast') {
+				// 실시간 화면: 시작에 답한 뒤 화면 한 장을 보낸다
+				reply({});
+				ws.send(
+					JSON.stringify({
+						method: 'Page.screencastFrame',
+						params: { data: Buffer.from('fake-frame').toString('base64'), sessionId: 1, metadata: {} }
+					})
+				);
+				return;
+			}
 			const custom = options.onMethod?.(message.method, message.params ?? {});
 			reply(custom ?? {});
 		});

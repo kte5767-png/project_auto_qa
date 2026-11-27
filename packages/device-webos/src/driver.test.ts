@@ -201,6 +201,31 @@ describe('WebOsDriver (가짜 TV)', () => {
 		expect(navigated).toBe(true);
 	});
 
+	it('실시간 화면: 화면 전송을 시작하고 받은 프레임을 넘긴 뒤 받았다고 알리고, 멈추면 전송을 끝낸다', async () => {
+		inspector = await startFakeInspector({ evaluate: () => null });
+		driver = await WebOsDriver.connect({ config: await config('cdp') });
+		const frames: string[] = [];
+		const stop = await driver.liveView((jpeg) => frames.push(Buffer.from(jpeg).toString()));
+		await expect.poll(() => frames).toEqual(['fake-frame']);
+		await expect.poll(() => inspector?.methods.includes('Page.screencastFrameAck')).toBe(true);
+		await stop();
+		expect(inspector.methods).toContain('Page.stopScreencast');
+	});
+
+	it('앱 저장 상태 지우기: localStorage·sessionStorage를 지우는 ES2017 페이지 스크립트', async () => {
+		const expressions: string[] = [];
+		inspector = await startFakeInspector({
+			evaluate: (expression) => {
+				expressions.push(expression);
+				return expression.includes('clearStorageInPage') ? { local: true, session: true } : null;
+			}
+		});
+		driver = await WebOsDriver.connect({ config: await config('cdp') });
+		expect(await driver.clearAppStorage()).toEqual({ local: true, session: true });
+		const script = expressions.find((e) => e.includes('clearStorageInPage')) ?? '';
+		expect(() => parse(script, { ecmaVersion: PAGE_SCRIPT_ECMA_VERSION })).not.toThrow();
+	});
+
 	it('앱 페이지가 목록에 없으면 현재 목록을 보여 주며 실패한다', async () => {
 		inspector = await startFakeInspector({
 			targets: [{ id: 'h', title: 'Home', url: 'file:///usr/palm/applications/com.webos.app.home/index.html' }]

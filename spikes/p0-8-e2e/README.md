@@ -79,7 +79,15 @@ TC 엑셀의 자동 대상 단계(화면설계서 번호 `--screen`, 기본 4 = 
 
 ```bash
 pnpm spike:tc-run <TC.xlsx> --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec [--only Search!9,Search!10] [--headed]
+pnpm spike:tc-run <TC.xlsx> --profile … --spec … --device [--app <앱 ID>]   # 실제 webOS TV
 ```
+
+**TV에서 실행 (`--device`, D-020·D-027)**: 브라우저 대신 `.env`의 `WEBOS_HOST`·`WEBOS_APP_ID`(또는 `--app`) TV에 연결합니다. 리모컨 키는 SSAP, 화면 관찰·캡처·실시간 화면은 앱 디버거(CDP), 글자 입력은 TV 키보드 서비스(IME)로 보냅니다. 판정 코드는 같습니다.
+
+- 준비: `spikes/p0-6-device/README.md`의 TV 설정(개발자 모드·Key Server·LG Connect Apps)과 `pnpm spike:device setup`·`pair`. 페어링 키는 `.data/devices`에만 저장합니다. 앱이 꺼져 있으면 ares로 켭니다.
+- "처음 상태로 열기"는 브라우저의 새 컨텍스트 대신 앱 저장소(localStorage·sessionStorage)를 지우고 앱 페이지를 다시 엽니다. 서버에 저장된 상태(앱 설정 등)는 남습니다.
+- 앱 프로필의 `url`은 쓰지 않습니다(설치된 앱을 엽니다). 진입 경로·요소·판정은 같은 프로필을 씁니다.
+- TV 없이 흐름 확인: `pnpm --filter @auto-qa/spike-p0-6-device fake-tv`(샘플 앱) 뒤 `WEBOS_HOST=127.0.0.1 WEBOS_INSPECTOR_PORT=9998 WEBOS_SSAP_PORT=1 WEBOS_SSAP_PLAIN_PORT=3000 WEBOS_APP_ID=com.autoqa.sampletvapp pnpm spike:tc-run … --device`
 
 TC 한 줄은 콜아웃 하나의 사양입니다. **앱은 한 번만 열고**, 열자마자 처음 화면의 지문(보이는 포커스 요소·포커스 영역·겹친 층)을 기억합니다. 화면이 바뀔 때는 앱을 다시 열지 않고 **처음 화면으로 키로 되돌린 뒤** 그 화면의 진입 경로를 따라갑니다(D-039). 같은 화면 안에서는 키를 누른 뒤 키로 목표에 돌아옵니다(D-038).
 
