@@ -1103,7 +1103,8 @@ class Runner {
 		if (!this.fresh(screen)) {
 			// 앞 키를 누른 뒤에도 포커스가 이 화면 콜아웃 안이면 홈까지 가지 않고 그 자리에서 목표로 (확인당 키 수를 줄임).
 			// 화면이 바뀌었거나(OK) 화면 밖(GNB)·팝업이면, 또는 그 자리에서 못 가면 홈 → 진입 경로
-			if (this.inScreen(await this.session.observe(), screen)) {
+			// 앞에서 다시 열기가 실패했으면 화면 세션이 없다 (그때는 진입부터 다시)
+			if (this.current !== null && this.inScreen(await this.session.observe(), screen)) {
 				const miss = await this.tryReach(screen, no, trail);
 				if (miss === null) return null;
 				record(
@@ -1302,7 +1303,38 @@ function defaultFocusOf(
 	const element = dft === null ? undefined : byNo.get(dft.no);
 	return dft === null || element === undefined ? null : { element, firstItem: dft.firstItem, basis: dft.basis };
 }
+/**
+ * 단계 하나 실행. 한 단계의 오류(다시 열기 실패 뒤 화면 세션 없음 등)로 전체 실행을 멈추지 않는다:
+ * 그 단계는 미실행(실행 오류)으로 적고, 다음 단계는 진입부터 다시 한다
+ */
 async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, trail: Trail[]): Promise<StepRun> {
+	const started = Date.now();
+	try {
+		return await runStepChecks(runner, c, s, outDir, trail);
+	} catch (error) {
+		const why = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
+		console.log(`      [오류] ${why} — 이 단계는 미실행으로 두고 다음 단계로`);
+		runner.current = null;
+		return {
+			key: `${c.sheet}!${s.row}`,
+			sheet: c.sheet,
+			row: s.row,
+			tcId: c.id,
+			title: c.title,
+			screen: c.specRef?.screenId ?? '',
+			callout: s.targetRef?.callout ?? null,
+			status: 'not-run',
+			explanation: `실행 오류: ${why}`,
+			basis: '',
+			results: [],
+			trail,
+			screenshot: null,
+			ms: Date.now() - started
+		};
+	}
+}
+
+async function runStepChecks(runner: Runner, c: TcCase, s: TcStep, outDir: string, trail: Trail[]): Promise<StepRun> {
 	const { ctx } = runner;
 	const started = Date.now();
 	const screen = c.specRef?.screenId ?? '';
