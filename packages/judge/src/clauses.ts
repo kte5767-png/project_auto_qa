@@ -74,6 +74,8 @@ export interface ClauseOptions {
 	inputWords: string[];
 	/** 리모컨 전용 조작 (방향키·OK·Back 밖의 버튼, 포인터) */
 	remoteWords: string[];
+	/** 항목 종류에 따른 조건 ("이미지 콘텐츠일 경우 …") — 화면에서 항목 종류를 구분하지 않으므로 문장 전체를 확인하지 않는다 */
+	itemTypeWords: string[];
 	/** "표시 내용"처럼 있는지 확인할 묶음 제목 */
 	presenceSections: string[];
 	/** 문장 끝이 이 낱말이면 그 요소가 있는지 확인 */
@@ -126,6 +128,7 @@ export const DEFAULT_CLAUSE_OPTIONS: ClauseOptions = {
 	referenceWords: ['정책을 따름', '참고', '시나리오 문서'],
 	inputWords: ['입력 가능 글자', '입력값', '공백 입력', '입력할 때'],
 	remoteWords: ['More Action', 'MRCU', '포인터', '매직 리모컨', '매직리모컨'],
+	itemTypeWords: ['콘텐츠일 경우', '콘텐츠인 경우', '콘텐츠의 경우', '콘텐츠일 때', '콘텐츠인 때'],
 	presenceSections: ['표시 내용', '표시'],
 	presenceEndings: ['제공', '노출', '표시', '제공됨', '노출됨', '표시됨']
 };
@@ -220,6 +223,11 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 	if (input !== undefined) {
 		// 글자 입력이 있어야 확인할 수 있는 조건 — 같은 문장의 다른 조건도 입력이 먼저다
 		add('input', 'none', input, `글자 입력 조작이 필요 ("${input}") — 지금 계획 범위 밖`);
+		return checks;
+	}
+	const itemType = has(body, options.itemTypeWords);
+	if (itemType !== undefined) {
+		add('data', 'none', itemType, `항목 종류에 따른 조건 ("${itemType}") — 화면에서 항목 종류를 구분하지 않음`);
 		return checks;
 	}
 	const remote = has(body, options.remoteWords);

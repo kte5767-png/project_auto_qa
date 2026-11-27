@@ -75,6 +75,14 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(kinds(none)).toEqual(['motion:code']);
 	});
 
+	it('항목 종류에 따른 조건("이미지 콘텐츠일 경우 …")은 문장 전체를 확인하지 않는다', () => {
+		const [image, plain] = splitClauses(
+			['- 이미지 콘텐츠일 경우 이미지 상세 페이지로 진입', '- 상세 페이지로 진입'].join('\n')
+		);
+		expect(kinds(image)).toEqual(['data:none']);
+		expect(kinds(plain)).toEqual(['transition:code']);
+	});
+
 	it('리모컨 전용 버튼·포인터 조작은 따로 구분한다 (그 조작의 결과까지)', () => {
 		const [more, pointer] = splitClauses(
 			[

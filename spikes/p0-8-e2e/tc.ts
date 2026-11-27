@@ -45,10 +45,11 @@ import {
 	matchByName,
 	nameScore,
 	overrideKeyTexts,
+	parseOperation,
 	planRoute,
 	withCalloutNames
 } from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
+import type { KeyAction, KeyMapOptions, NavScreen, OperationPlan } from '@auto-qa/planner';
 import type { SpecKey } from '@auto-qa/spec';
 import {
 	listValuesAt,
@@ -227,6 +228,72 @@ function listNextKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 조작 → 결과 (planner parseOperation):
+ * - closed: 목표에서 문장의 키를 차례로 누른 뒤 이 화면(팝업)이 닫혔는지
+ * - uninterrupted: 목표에서 OK(선택) 바로 뒤, 끝나기 전에 이 콜아웃에서 "동작 없음"인 키를 끼워 넣고, 자리 잡은 뒤
+ *   OK가 가는 곳(화면 최상단 Default 포커스 항목)이 화면 위쪽 안에 보이는지 (스크롤이 중간에 멈추지 않았는지)
+ */
+async function checkOperation(
+	runner: Runner,
+	screen: string,
+	no: string,
+	op: OperationPlan,
+	noopKey: string | null,
+	clause: Clause,
+	check: Check,
+	trail: Trail[]
+): Promise<CheckResult> {
+	const { ctx } = runner;
+	const miss = await runner.reach(screen, no, trail);
+	if (miss !== null) return res(clause, check, 'needs-review', miss.reason);
+	if (op.result === 'closed') {
+		ctx.live.phase('조작 → 닫힘 확인 중');
+		if (!runner.shown(await runner.session.observe(), screen))
+			return res(clause, check, 'needs-review', `누르기 전 ${screen} 화면이 보이지 않음`);
+		const keys = op.keys.map((k) => KEY_OF[k]).filter((k): k is RemoteKey => k !== undefined);
+		for (const key of keys) {
+			const r = await runner.session.press(key);
+			record(trail, { key, focus: focusText(r.obs), stable: r.stable }, '    조작 ');
+		}
+		const label = keys.map((k) => KEY_LABEL[k] ?? k).join(' → ');
+		const closed = await runner.session.until((o) => !runner.shown(o, screen), ctx.timing.transitionWaitMs);
+		const now = closed ?? (await runner.session.observe());
+		return closed !== null
+			? res(clause, check, 'pass', `${label} → ${screen} 화면 닫힘 (포커스 ${focusText(now)})`)
+			: res(clause, check, 'fail', `${label} 뒤에도 ${screen} 화면이 닫히지 않음 (포커스 ${focusText(now)})`);
+	}
+	// uninterrupted
+	const interrupt = noopKey === null ? undefined : KEY_OF[noopKey];
+	if (interrupt === undefined)
+		return res(clause, check, null, '끼워 넣을 입력(이 콜아웃에서 "동작 없음"인 키)을 TC에서 찾지 못함');
+	const dft = defaultFocusOf(ctx, screen, '화면 최상단 Default 포커스 항목');
+	if (dft === null) return res(clause, check, null, '선택 뒤 가야 할 곳(화면 최상단 기본 포커스)을 정하지 못함');
+	ctx.live.phase('이동 중 입력 확인 중');
+	const driver = runner.session.driver;
+	await driver.pressKey('OK');
+	await sleep(ctx.timing.pollMs);
+	await driver.pressKey(interrupt);
+	const settled = await runner.session.settle(ctx.timing.readyTimeoutMs);
+	const label = `OK, 곧바로 ${KEY_LABEL[interrupt] ?? interrupt}`;
+	record(trail, { key: null, focus: `${label} → ${focusText(settled.obs)}`, stable: settled.settled }, '    ');
+	const top = target(settled.obs, dft.element)?.rect ?? null;
+	if (top === null) return res(clause, check, 'fail', `${label} 뒤 ${dft.element}이(가) 보이지 않음`);
+	return top[1] >= -2
+		? res(
+				clause,
+				check,
+				'pass',
+				`${label} → 맨 위 ${dft.element}까지 이동 (위치 y=${top[1]}, 포커스 ${focusText(settled.obs)})`
+			)
+		: res(
+				clause,
+				check,
+				'fail',
+				`${label} 뒤 맨 위까지 가지 않음: ${dft.element} 위치 y=${top[1]} (포커스 ${focusText(settled.obs)})`
+			);
+}
 
 /**
  * Marquee (움직임·시간): 넘치는 글자가 있는 항목에 포커스를 두고 기다린 뒤, 넘치는 글자의 위치가 바뀌는지 본다.
@@ -937,6 +1004,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	const keyChecks: { clause: Clause; check: Check }[] = [];
 	const okChecks: OkCheck[] = [];
 	const motionChecks: { clause: Clause; check: Check }[] = [];
+	const opChecks: { clause: Clause; check: Check; op: OperationPlan }[] = [];
 
 	for (const clause of clauses) {
 		// "선택 시" 묶음의 있는지·포커스 조건은 OK를 누른 뒤의 결과다
@@ -946,6 +1014,12 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		for (const check of clause.checks) {
 			if (check.method === 'none') {
 				results.push(res(clause, check, null, check.reason));
+				continue;
+			}
+			// 조작 → 결과 문장 중 키 순서와 결과를 규칙으로 정할 수 있는 것 ("상단방향키 … 확인 버튼 선택 시 팝업 닫힘")
+			const op = check.kind === 'behavior' || check.kind === 'descriptive' ? parseOperation(clause.text) : null;
+			if (op !== null) {
+				opChecks.push({ clause, check, op });
 				continue;
 			}
 			if (check.method === 'ai') {
@@ -1143,16 +1217,23 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 			const before = await runner.session.observe();
 			const r = await runner.session.press('OK');
 			record(trail, { key: 'OK', focus: focusText(r.obs), stable: r.stable }, '    ');
-			// 화면 전환은 로딩이 끝나야 보이므로 다른 화면이 나타날 때까지 조금 기다린다
-			const settled =
-				(await runner.session.until(
-					(o) =>
-						Object.keys(ctx.profile.screens).some(
-							(sc) => sc !== screen && runner.shown(o, sc) && !runner.shown(before, sc)
-						) || o.focus !== null,
-					ctx.timing.readyTimeoutMs
-				)) ?? r.obs;
-			const after = settled;
+			// 화면 전환은 늦게 시작하거나 로딩이 끝나야 보인다: 다른 화면이 나타나거나, 포커스가 이 화면 콜아웃을 벗어나거나,
+			// 포커스가 바뀔 때까지 기다린다 (바뀌면 바로 끝남, 최대 transitionWaitMs). 안 바뀌면 그대로 본다
+			const otherShown = (o: Observation): boolean =>
+				Object.keys(ctx.profile.screens).some(
+					(sc) => sc !== screen && runner.shown(o, sc) && !runner.shown(before, sc)
+				);
+			const moved = (o: Observation): boolean =>
+				otherShown(o) || !runner.inScreen(o, screen) || focusText(o) !== focusText(before);
+			const after =
+				moved(r.obs) && r.obs.focus !== null
+					? r.obs
+					: ((await runner.session.until(
+							(o) => moved(o) && o.focus !== null && !runner.session.loading(o),
+							ctx.timing.transitionWaitMs
+						)) ?? (await runner.session.observe()));
+			// 이 화면을 벗어났는가 (프로필에 없는 화면 — 재생·다른 시트의 상세 페이지 — 으로 간 경우)
+			const left = !runner.inScreen(after, screen);
 			const newlyShown = (sc: string): boolean => {
 				const a = target(after, ctx.registry.detect(sc));
 				const b = target(before, ctx.registry.detect(sc));
@@ -1218,6 +1299,18 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 					continue;
 				}
 				const wantScreen = namedScreen(ctx.profile, clause.text, screen);
+				if (wantScreen === null && kind === 'transition' && changedTo.length === 0 && left) {
+					// 문장이 가리키는 화면이 앱 프로필에 없다(다른 시트의 페이지·재생 화면). 이 화면을 벗어났는지만 코드로 확인한다
+					results.push(
+						res(
+							clause,
+							check,
+							'pass',
+							`OK → 이 화면을 벗어남 (포커스 ${focusText(after)}) — 도착 화면은 앱 프로필에 없어 이름은 확인하지 않음`
+						)
+					);
+					continue;
+				}
 				if (wantScreen === null) {
 					results.push(
 						res(
@@ -1246,6 +1339,13 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 				);
 			}
 		}
+	}
+
+	for (const { clause, check, op } of opChecks) {
+		const noop = keyChecks.find(({ clause: k }) => /동작\s*없음/.test(k.text))?.check.value;
+		results.push(
+			await checkOperation(runner, screen, no, op, noop === undefined ? null : String(noop), clause, check, trail)
+		);
 	}
 
 	const v: StepVerdict = aggregateStep(results);

@@ -68,6 +68,8 @@ export interface Timing {
 	maxResetKeys: number;
 	/** 포커스 없는 층(종료 토스트 등)이 사라지기를 기다리는 최대 시간 (ms) */
 	toastWaitMs: number;
+	/** 선택(OK) 뒤 화면·포커스가 바뀌기를 기다리는 최대 시간 (ms). 바뀌면 바로 끝난다 (고정 대기 아님) */
+	transitionWaitMs: number;
 	/** Marquee: TC에 "N초 뒤"가 없을 때 포커스 뒤 기다리는 시간 (ms) */
 	motionWaitMs: number;
 	/** Marquee: 기다릴 시간에 더하는 여유 (ms, 시작이 조금 늦어도 놓치지 않게) */
@@ -85,6 +87,7 @@ export const DEFAULT_TIMING: Timing = {
 	maxSearchKeys: 10,
 	maxResetKeys: 12,
 	toastWaitMs: 4000,
+	transitionWaitMs: 5000,
 	motionWaitMs: 2000,
 	motionMarginMs: 800,
 	motionGapMs: 700,
