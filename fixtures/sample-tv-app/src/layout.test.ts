@@ -41,7 +41,8 @@ describe('getLayout', () => {
 		['D13', (l: ReturnType<typeof getLayout>) => l.search.cardMarquee, false],
 		['D14', (l: ReturnType<typeof getLayout>) => l.search.inputOverflow, 'clip'],
 		['D15', (l: ReturnType<typeof getLayout>) => l.search.resultColumns, 0],
-		['D16', (l: ReturnType<typeof getLayout>) => l.search.saveToggle, false]
+		['D16', (l: ReturnType<typeof getLayout>) => l.search.saveToggle, false],
+		['D17', (l: ReturnType<typeof getLayout>) => l.search.recentWhenOff, true]
 	])('%s는 해당 값만 바꾼다', (id, pick, expected) => {
 		const changed = getLayout(new Set([id]));
 		expect(pick(changed)).toEqual(expected);

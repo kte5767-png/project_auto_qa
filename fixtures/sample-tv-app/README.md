@@ -60,6 +60,7 @@ pnpm spike:device sample-ipk                        # 빌드 + ares-package로 i
 | D14 | 사양   | 검색창 넘치는 입력값 말줄임 없음                | ← OK                         |
 | D15 | 사양   | 검색 결과가 그리드가 아니라 한 줄 가로 목록     | ← OK OK (글자 입력 뒤 Enter) |
 | D16 | 사양   | 최근 검색어 저장 On/Off가 OK로 바뀌지 않음      | ← OK → OK                    |
+| D17 | 사양   | 최근 검색어 저장 Off여도 최근 검색어 영역 보임  | ← OK ↓ OK Back → OK          |
 
 정확한 기대값·실제값과 채점용 대상은 `defects.json`에 있습니다. `pnpm sample:verify`가 두 포커스 방식 모두에서 각 결함이 재현되는지, 결함이 없을 때 포커스가 기대 위치에 있는지 확인합니다.
 

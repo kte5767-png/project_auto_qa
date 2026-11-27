@@ -42,9 +42,11 @@ function CardTitle({ text, marquee, testId }: { text: string; marquee: boolean; 
 export function SearchScreen({ onBack }: SearchScreenProps) {
 	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch, saveRecent, setSaveRecent } =
 		useApp();
-	// 최근 검색어가 있으면 그 줄이 맨 위에 생기고 아래 섹션이 내려간다 (화면설계서 4.3)
-	const shift = recentSearches.length > 0 ? 162 : 0;
 	const { search } = layout;
+	// 최근 검색어가 있으면 그 줄이 맨 위에 생기고 아래 섹션이 내려간다 (화면설계서 4.3).
+	// 저장 Off면 기록은 두고 영역만 숨긴다 (4.4: Off → On이면 이전 기록을 다시 보여 줌). D17은 Off여도 보임
+	const showRecent = recentSearches.length > 0 && (saveRecent || search.recentWhenOff);
+	const shift = showRecent ? 162 : 0;
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [editing, setEditing] = useState(false);
 	const [query, setQuery] = useState('');
@@ -175,7 +177,7 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 
 			{submitted === null && (
 				<>
-					{recentSearches.length > 0 && (
+					{showRecent && (
 						<>
 							<h2 className="search-section-title" style={{ top: 178 }}>
 								Recent Searches

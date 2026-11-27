@@ -40,9 +40,21 @@ import {
 	checkMaxCount,
 	checkPresence,
 	checkToggle,
-	splitClauses
+	parseToggleConsequence,
+	sameToggle,
+	splitClauses,
+	toggleStates
 } from '@auto-qa/judge';
-import type { Check, CheckResult, Clause, StepVerdict, ToggleSample, Verdict } from '@auto-qa/judge';
+import type {
+	Check,
+	CheckResult,
+	Clause,
+	StepVerdict,
+	ToggleConsequence,
+	ToggleSample,
+	ToggleState,
+	Verdict
+} from '@auto-qa/judge';
 import {
 	DEFAULT_KEYMAP_OPTIONS,
 	DEFAULT_ROUTE_OPTIONS,
@@ -430,6 +442,13 @@ function toggleSample(o: Observation): ToggleSample {
 	return { identity: `${f.spotlightId ?? f.tag}@${f.rect[0]},${f.rect[1]}`, state: f.state, text: f.text };
 }
 
+/** 토글 확인 결과와 OK 전후 상태 표시 (켜고 끈 상태에 따른 결과를 볼 때 두 상태를 알아보는 데 쓴다) */
+interface ToggleOutcome {
+	result: CheckResult;
+	before: ToggleSample;
+	first: ToggleSample;
+}
+
 /** "On/Off 가능": 목표에서 OK → 상태가 바뀌는지, 다시 OK → 처음으로 돌아오는지 (다음 단계가 같은 상태에서 시작하도록 되돌린다) */
 async function checkToggleClause(
 	runner: Runner,
@@ -439,7 +458,7 @@ async function checkToggleClause(
 	clause: Clause,
 	check: Check,
 	trail: Trail[]
-): Promise<CheckResult> {
+): Promise<ToggleOutcome | CheckResult> {
 	const miss = await runner.reach(screen, no, trail);
 	if (miss !== null) return res(clause, check, 'needs-review', miss.reason);
 	runner.ctx.live.phase('켜고 끄기 확인 중');
@@ -456,7 +475,211 @@ async function checkToggleClause(
 	}
 	const r = checkToggle(before, first, second, element);
 	if (!r.restored) console.log(`      [주의] ${r.explanation} — 다음 단계 상태가 달라질 수 있음`);
-	return res(clause, check, r.verdict, r.explanation);
+	return { result: res(clause, check, r.verdict, r.explanation), before, first };
+}
+
+interface ConsequenceItem {
+	clause: Clause;
+	check: Check;
+	c: ToggleConsequence;
+}
+
+/** 결과를 볼 대상: 요소, 그 요소의 화면, 볼 화면 (같은 패널에서 진입이 가장 가벼운 화면 — 글자 입력·선택이 적은 것) */
+interface ConsequenceTarget {
+	element: string;
+	screen: string;
+	view: string;
+}
+
+function consequenceTarget(runner: Runner, subject: string): ConsequenceTarget | null {
+	const { ctx } = runner;
+	const candidates = Object.entries(ctx.registry.elements).filter(
+		([n, e]) => !n.startsWith('@') && e.callout !== undefined
+	);
+	const m = matchByName(subject, candidates, ([n, e]) => [n, ...(e.names ?? [])], ctx.options);
+	if (m === null) return null;
+	const [element, def] = m.match;
+	const screen = (def.callout ?? '').split('#')[0] ?? '';
+	if (ctx.profile.screens[screen] === undefined) return null;
+	// 그 화면 진입 경로가 대상이 나타나기를 기다리면(4.3 "최근 검색어가 있을 경우") 없어야 하는 상태에서는 못 들어간다.
+	// 같은 패널로 표시되는 화면 중 대상을 기다리지 않고, 글자 입력·OK가 가장 적은 화면에서 본다
+	const weight = (sc: string): number | null => {
+		const path = entryPath(ctx.profile, ctx.registry, sc);
+		if (path.some((p) => 'waitFor' in p && p.waitFor === element)) return null;
+		return path.reduce((w, p) => w + ('type' in p ? 10 : 'press' in p && p.press === 'OK' ? 1 : 0), 0);
+	};
+	const views = Object.keys(ctx.profile.screens)
+		.filter((sc) => sc === screen || runner.sameDetect(sc, screen))
+		.map((sc) => ({ sc, w: weight(sc) }))
+		.filter((v): v is { sc: string; w: number } => v.w !== null)
+		.sort((a, b) => a.w - b.w);
+	const view = views[0]?.sc;
+	return view === undefined ? null : { element, screen, view };
+}
+
+const STATE_LABEL: Record<ToggleState, string> = { on: '켜짐', off: '꺼짐' };
+
+/**
+ * 켜고 끈 상태에 따른 결과 ("Off한 경우 … 최근 검색어 영역 제공하지 않음", "Off -> On … 저장된 기록 보여줌"):
+ * 1) 대상 화면에 들어가 기준을 본다 (그 화면 진입 경로가 기록을 만든다). 2) 토글 화면에서 OK로 상태를 바꾸고
+ * 3) 볼 화면에 다시 들어가(앱을 다시 열지 않음) 대상이 보이는지 본다. 문장 순서대로 상태를 바꾸고, 끝나면 처음 상태로
+ * 되돌린 뒤 되돌아왔는지 확인한다. 앱을 다시 열게 되면(상태가 처음으로 돌아갔을 수 있음) 판정하지 않는다
+ */
+async function checkToggleConsequences(
+	runner: Runner,
+	toggleScreen: string,
+	no: string,
+	items: readonly ConsequenceItem[],
+	toggle: ToggleOutcome,
+	trail: Trail[]
+): Promise<CheckResult[]> {
+	const out: CheckResult[] = [];
+	const review = (list: readonly ConsequenceItem[], why: string): void => {
+		for (const { clause, check } of list) out.push(res(clause, check, 'needs-review', why));
+	};
+	if (toggle.result.verdict !== 'pass') {
+		review(items, `켜고 끄기가 확인되지 않아 상태에 따른 결과를 볼 수 없음 (${toggle.result.explanation})`);
+		return out;
+	}
+	const states = toggleStates(toggle.before, toggle.first);
+	if (states === null) {
+		review(items, 'OK 전후 상태 표시로 켜짐·꺼짐을 정할 수 없어 상태에 따른 결과를 볼 수 없음');
+		return out;
+	}
+	const sample = { [states.a]: toggle.before, [states.b]: toggle.first } as Record<ToggleState, ToggleSample>;
+
+	// 대상: 이름으로 찾고, 못 찾으면 앞 조건의 대상 ("저장된 기록" = 앞 문장의 최근 검색어 영역)
+	let last: ConsequenceTarget | null = null;
+	const resolved: (ConsequenceItem & { t: ConsequenceTarget; note: string })[] = [];
+	for (const it of items) {
+		const t = consequenceTarget(runner, it.c.subject);
+		if (t !== null) {
+			last = t;
+			resolved.push({ ...it, t, note: '' });
+		} else if (last !== null) {
+			resolved.push({ ...it, t: last, note: ` ("${it.c.subject}" = 앞 조건의 ${last.element})` });
+		} else {
+			review([it], `"${it.c.subject}"에 대응된 요소가 없어 확인할 수 없음`);
+		}
+	}
+	if (resolved.length === 0) return out;
+	const { ctx } = runner;
+	ctx.live.phase('켜고 끈 상태에 따른 결과 확인 중');
+	const look = async (t: ConsequenceTarget, keep: boolean): Promise<ObservedTarget | string> => {
+		const e = await runner.open(t.view, trail, keep);
+		if (e !== null) return `${t.view} 화면에 가지 못함: ${e}`;
+		return target(await runner.observeAs(t.screen), t.element) ?? `${t.element}을(를) 관찰하지 않음`;
+	};
+	// 처음 상태(되돌릴 상태)와 지금 상태
+	const st: { original: ToggleState | null; current: ToggleState | null } = { original: null, current: null };
+	const setState = async (want: ToggleState): Promise<string | null> => {
+		st.current = null;
+		const e = await runner.open(toggleScreen, trail, true);
+		if (e !== null) return `${toggleScreen} 화면에 가지 못함: ${e}`;
+		const miss = await runner.reach(toggleScreen, no, trail);
+		if (miss !== null) return miss.reason;
+		for (let i = 0; i < 3; i++) {
+			const now = toggleSample(await runner.session.observe());
+			if (now.identity !== toggle.before.identity) return '켜고 끄는 버튼에서 포커스가 벗어남';
+			const at = sameToggle(now, sample.on) ? 'on' : sameToggle(now, sample.off) ? 'off' : null;
+			st.original ??= at;
+			if (at === want) {
+				st.current = want;
+				return null;
+			}
+			if (i === 2) break;
+			const r = await runner.session.press('OK');
+			record(trail, { key: 'OK', focus: focusText(r.obs), stable: r.stable }, `    ${STATE_LABEL[want]}으로 `);
+		}
+		return `${STATE_LABEL[want]}으로 바꾸지 못함`;
+	};
+
+	// 1) 기준: 대상 화면에 들어가(진입 경로가 기록을 만든다) 본 뒤, 볼 화면에서 다시 본다
+	const base = new Map<string, ObservedTarget | string>();
+	for (const t of new Map(resolved.map((r) => [r.t.element, r.t])).values()) {
+		const e = await runner.open(t.screen, trail);
+		base.set(t.element, e !== null ? `${t.screen} 화면에 가지 못함: ${e}` : await look(t, true));
+	}
+	const opens = runner.opens;
+	const order: ToggleState[] = [];
+	for (const r of resolved) if (!order.includes(r.c.state)) order.push(r.c.state);
+	let restoreNote = '';
+	try {
+		for (const state of order) {
+			const group = resolved.filter((r) => r.c.state === state);
+			const err = await setState(state);
+			if (err !== null) {
+				review(group, `${STATE_LABEL[state]}으로 바꾸지 못해 확인할 수 없음 (${err})`);
+				continue;
+			}
+			const seen = new Map<string, ObservedTarget | string>();
+			for (const r of group) {
+				const { clause, check, c, t, note } = r;
+				const b = base.get(t.element);
+				const v = seen.get(t.element) ?? (await look(t, true));
+				seen.set(t.element, v);
+				const where = `${STATE_LABEL[state]}에서 ${t.element}${note}`;
+				if (runner.opens !== opens) {
+					out.push(
+						res(clause, check, 'needs-review', `${where}: 앱을 다시 열어 상태가 처음으로 돌아갔을 수 있음`)
+					);
+				} else if (typeof v === 'string') {
+					out.push(res(clause, check, 'needs-review', `${where}: ${v}`));
+				} else if (typeof b === 'string' || b === undefined) {
+					out.push(res(clause, check, 'needs-review', `${where}: 기준을 보지 못함 (${b ?? '없음'})`));
+				} else if (!c.shown) {
+					if (b.visible === 0) {
+						out.push(
+							res(
+								clause,
+								check,
+								'needs-review',
+								`${where}: 바꾸기 전에도 보이지 않아 상태의 효과를 알 수 없음`
+							)
+						);
+					} else {
+						out.push(
+							v.visible === 0
+								? res(clause, check, 'pass', `${where} 안 보임 (바꾸기 전 ${b.visible}개)`)
+								: res(clause, check, 'fail', `${where}이(가) 보임 (${v.visible}개) — 없어야 함`)
+						);
+					}
+				} else if (c.ifBefore && b.visible === 0) {
+					out.push(res(clause, check, null, `${where}: 바꾸기 전 기록이 없어 해당 없음`));
+				} else if (v.visible === 0) {
+					out.push(res(clause, check, 'fail', `${where}이(가) 보이지 않음`));
+				} else {
+					const missing = c.ifBefore ? b.texts.filter((x) => !v.texts.includes(x)) : [];
+					out.push(
+						missing.length === 0
+							? res(
+									clause,
+									check,
+									'pass',
+									`${where} 보임 (${v.visible}개${c.ifBefore ? ', 이전 기록 그대로' : ''})`
+								)
+							: res(
+									clause,
+									check,
+									'fail',
+									`${where}에 이전 기록이 없음: ${missing.slice(0, 3).join(', ')}`
+								)
+					);
+				}
+			}
+		}
+	} finally {
+		// 처음 상태로 되돌린다 (다른 단계·다른 사람이 같은 앱 설정을 쓴다). 되돌리지 못하면 크게 알린다
+		const back = st.original ?? states.a;
+		if (st.current !== back) {
+			const err = await setState(back);
+			if (err !== null) {
+				restoreNote = ` — [주의] 설정을 처음(${STATE_LABEL[back]})으로 되돌리지 못함: ${err}`;
+				console.log(`      [주의] ${toggleScreen} 설정을 ${STATE_LABEL[back]}으로 되돌리지 못함 (${err})`);
+			}
+		}
+	}
+	return restoreNote === '' ? out : out.map((r) => ({ ...r, explanation: `${r.explanation}${restoreNote}` }));
 }
 
 async function checkOperation(
@@ -929,8 +1152,11 @@ class Runner {
 		return this.launch(trail);
 	}
 
-	/** 그 화면까지 간다: 앱이 없으면 열고, 있으면 처음 화면으로 되돌린 뒤 진입 경로를 따라간다 (앱을 다시 열지 않음) */
-	async open(screen: string, trail: Trail[]): Promise<string | null> {
+	/**
+	 * 그 화면까지 간다: 앱이 없으면 열고, 있으면 처음 화면으로 되돌린 뒤 진입 경로를 따라간다 (앱을 다시 열지 않음).
+	 * keep: 앞 단계가 남긴 상태가 달라도 다시 열지 않는다 (상태를 일부러 바꾼 뒤 결과를 볼 때)
+	 */
+	async open(screen: string, trail: Trail[], keep = false): Promise<string | null> {
 		const { ctx } = this;
 		this.current = null;
 		const ready = this.app === null ? await this.launch(trail) : await this.resetHome(trail);
@@ -960,7 +1186,7 @@ class Runner {
 			error = await enter();
 		}
 		if (error !== null) return error;
-		const drift = await this.stateDrift(screen, changesBefore);
+		const drift = keep ? null : await this.stateDrift(screen, changesBefore);
 		if (drift !== null) {
 			// 앞 단계가 남긴 상태가 화면설계서의 전제와 다르게 만든다 → 깨끗한 앱에서 다시 (재시작은 이때만)
 			record(trail, { key: null, focus: `앱 상태가 다름 → 다시 열기 (${drift})`, stable: true }, '      ');
@@ -1393,6 +1619,7 @@ async function runStepChecks(runner: Runner, c: TcCase, s: TcStep, outDir: strin
 	const opChecks: { clause: Clause; check: Check; op: OperationPlan }[] = [];
 	const inputChecks: { clause: Clause; check: Check }[] = [];
 	const toggleChecks: { clause: Clause; check: Check }[] = [];
+	const consequenceChecks: ConsequenceItem[] = [];
 	// 켜고 끄는 단계에서 "선택 시" 묶음의 다른 조건은 바뀐 상태에 따른 결과다 ("Off한 경우 … 제공하지 않음").
 	// 상태를 바꾼 뒤 다른 화면에서 봐야 하므로 OK 한 번의 결과로 보지 않는다 (OK는 토글 판정만 누르고 되돌린다)
 	const hasToggle = clauses.some((c) => c.checks.some((k) => k.kind === 'toggle'));
@@ -1423,6 +1650,13 @@ async function runStepChecks(runner: Runner, c: TcCase, s: TcStep, outDir: strin
 				onSelect &&
 				['presence', 'focus', 'absence', 'behavior', 'transition', 'no-action'].includes(check.kind)
 			) {
+				// "Off한 경우 X 제공하지 않음"처럼 상태·대상·결과를 읽을 수 있으면 상태를 바꿔 본다 (조건당 한 번)
+				const c = parseToggleConsequence(clause.text);
+				if (c !== null) {
+					if (!consequenceChecks.some((x) => x.clause === clause))
+						consequenceChecks.push({ clause, check, c });
+					continue;
+				}
 				results.push(
 					res(
 						clause,
@@ -1636,12 +1870,25 @@ async function runStepChecks(runner: Runner, c: TcCase, s: TcStep, outDir: strin
 		}
 	}
 
+	let toggled: ToggleOutcome | null = null;
 	for (const { clause, check } of toggleChecks) {
-		results.push(
-			blocked !== null
-				? res(clause, check, 'needs-review', blocked)
-				: await checkToggleClause(runner, screen, no, element, clause, check, trail)
-		);
+		if (blocked !== null) {
+			results.push(res(clause, check, 'needs-review', blocked));
+			continue;
+		}
+		const r = await checkToggleClause(runner, screen, no, element, clause, check, trail);
+		if ('result' in r) {
+			results.push(r.result);
+			toggled ??= r;
+		} else results.push(r);
+	}
+	if (consequenceChecks.length > 0) {
+		if (toggled === null) {
+			const why = blocked ?? '켜고 끄기를 확인하지 못해 상태에 따른 결과를 볼 수 없음';
+			for (const { clause, check } of consequenceChecks) results.push(res(clause, check, 'needs-review', why));
+		} else {
+			results.push(...(await checkToggleConsequences(runner, screen, no, consequenceChecks, toggled, trail)));
+		}
 	}
 
 	// 선택 시: 목표에서 OK 한 번을 누르고 결과(화면 전환·나타난 것·포커스·변화 없음)를 함께 본다
