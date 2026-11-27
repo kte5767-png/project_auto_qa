@@ -14,6 +14,7 @@
 	"dependencies": {
 		"@auto-qa/browser": "workspace:*",
 		"@auto-qa/core": "workspace:*",
+		"@auto-qa/device-webos": "workspace:*",
 		"@auto-qa/figma": "workspace:*",
 		"@auto-qa/focus": "workspace:*",
 		"@auto-qa/judge": "workspace:*",

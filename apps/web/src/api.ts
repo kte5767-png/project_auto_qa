@@ -73,6 +73,8 @@ export interface Settings {
 	url: string;
 	headed: boolean;
 	overwrite: boolean;
+	/** 실제 webOS TV에서 실행 (.env의 WEBOS_* 설정). 없으면 브라우저 시뮬레이터 */
+	device?: boolean;
 }
 
 /** 이 화면(웹 서버)에서 띄운 검수 프로세스 */

@@ -200,6 +200,13 @@ export class CdpConnection {
 		this.listeners.set(method, [...(this.listeners.get(method) ?? []), listener]);
 	}
 
+	off(method: string, listener: (params: Record<string, unknown>) => void): void {
+		this.listeners.set(
+			method,
+			(this.listeners.get(method) ?? []).filter((l) => l !== listener)
+		);
+	}
+
 	/** JS 식 평가. Promise면 기다리고, 결과는 JSON 값으로 받는다. 페이지 예외는 ScriptError */
 	async evaluate<T>(expression: string, timeoutMs = 30_000): Promise<T> {
 		const response = await this.send(

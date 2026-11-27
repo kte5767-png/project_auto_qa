@@ -30,5 +30,5 @@ export { SSAP_BUTTONS, keyProbeInstallScript, keyProbeWaitScript } from './keys'
 export type { DeviceRecord } from './store';
 export { DeviceStore } from './store';
 export { probePort } from './net';
-export type { KeyPressResult, WebOsDriverOptions } from './driver';
-export { WebOsDriver, waitForAppTarget } from './driver';
+export type { DeviceLiveViewOptions, KeyPressResult, WebOsDriverOptions } from './driver';
+export { DEFAULT_DEVICE_LIVE_VIEW_OPTIONS, WebOsDriver, waitForAppTarget } from './driver';

@@ -227,16 +227,25 @@ export interface ResetState {
 
 /** 키를 누르기 전후 지문이 같은가 (BACK 반응 없음 = 최상위) */
 /**
- * now에는 있고 base에는 없는 요소 이름 (같은 이름은 개수로 셈). 앞 단계가 남긴 상태(최근 검색어 등)로
- * 화면에 새로 생긴 요소를 찾는 데 쓴다 (D-043 ②)
+ * 요소 이름의 숫자를 지운 꼴. 앱이 마운트할 때마다 번호를 새로 매기는 이름(Enact Spotlight의 "container-12")은
+ * 화면을 나갔다 들어오면 번호만 바뀐다. 같은 요소인지는 번호를 뺀 이름과 개수로 본다
+ */
+export function stableItemName(name: string): string {
+	return name.replace(/\d+/g, '#');
+}
+
+/**
+ * now에는 있고 base에는 없는 요소 이름 (번호를 뺀 이름이 같은 것은 개수로 셈). 앞 단계가 남긴 상태(최근 검색어 등)로
+ * 화면에 새로 생긴 요소를 찾는 데 쓴다 (D-043 ②). 번호만 바뀐 요소(다시 마운트된 컨테이너)는 새로 생긴 것이 아니다
  */
 export function addedItems(base: readonly string[], now: readonly string[]): string[] {
 	const left = new Map<string, number>();
-	for (const x of base) left.set(x, (left.get(x) ?? 0) + 1);
+	for (const x of base) left.set(stableItemName(x), (left.get(stableItemName(x)) ?? 0) + 1);
 	const added: string[] = [];
 	for (const x of now) {
-		const n = left.get(x) ?? 0;
-		if (n > 0) left.set(x, n - 1);
+		const k = stableItemName(x);
+		const n = left.get(k) ?? 0;
+		if (n > 0) left.set(k, n - 1);
 		else added.push(x);
 	}
 	return added;

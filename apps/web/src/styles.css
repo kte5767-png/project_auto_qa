@@ -884,8 +884,14 @@ input[type='text'] {
 .env.on {
 	border: 2px solid var(--navy);
 }
+.env {
+	cursor: pointer;
+}
+/* 고르지 않은 실행 환경 (누르면 고름) */
 .env.off {
-	opacity: 0.5;
+	opacity: 0.6;
+}
+.env:disabled {
 	cursor: not-allowed;
 }
 .summary {

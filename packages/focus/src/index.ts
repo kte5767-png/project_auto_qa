@@ -29,6 +29,7 @@ export {
 	nextResetStep,
 	sameFingerprint,
 	addedItems,
+	stableItemName,
 	takeFingerprint
 } from './fingerprint';
 export type { MotionSample } from './motion';

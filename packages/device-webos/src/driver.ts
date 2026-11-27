@@ -92,6 +92,34 @@ function navigateInPage(arg: NavigateArg): boolean {
 	return true;
 }
 
+/** 앱 저장 상태(localStorage·sessionStorage)를 지운다. 막힌 저장소는 건너뛴다 (ES2017) */
+function clearStorageInPage(): { local: boolean; session: boolean } {
+	const out = { local: false, session: false };
+	try {
+		window.localStorage.clear();
+		out.local = true;
+	} catch (e) {
+		// ES2017: catch 바인딩을 생략할 수 없다 (막힌 저장소면 지우지 못한 것으로 둔다)
+		out.local = e === undefined;
+	}
+	try {
+		window.sessionStorage.clear();
+		out.session = true;
+	} catch (e) {
+		out.session = e === undefined;
+	}
+	return out;
+}
+
+export interface DeviceLiveViewOptions {
+	/** JPEG 품질 (0~100) */
+	quality: number;
+	width: number;
+	height: number;
+}
+
+export const DEFAULT_DEVICE_LIVE_VIEW_OPTIONS: DeviceLiveViewOptions = { quality: 60, width: 960, height: 540 };
+
 /** 표식이 없는(새) 문서이고 로드가 끝났는지 */
 function isNewDocumentInPage(token: string): boolean {
 	const w = window as unknown as { __autoQaNavToken?: string };
@@ -273,6 +301,42 @@ export class WebOsDriver implements Driver {
 
 	screenshot(options: ScreenshotOptions = { type: 'png' }): Promise<Uint8Array> {
 		return this.cdp.captureScreenshot(options.type, options.quality);
+	}
+
+	/**
+	 * 실시간 화면 (CDP 화면 전송, 판정과 무관): 프레임마다 JPEG를 넘기고, 멈추는 함수를 돌려준다.
+	 * 디버거 연결이 바뀌면(reattach) 끊기므로 다시 부른다
+	 */
+	async liveView(
+		onFrame: (jpeg: Uint8Array) => void,
+		options: Partial<DeviceLiveViewOptions> = {}
+	): Promise<() => Promise<void>> {
+		const o = { ...DEFAULT_DEVICE_LIVE_VIEW_OPTIONS, ...options };
+		const cdp = this.cdp;
+		const handler = (params: Record<string, unknown>): void => {
+			void cdp.send('Page.screencastFrameAck', { sessionId: params['sessionId'] }).catch(() => undefined);
+			const data = params['data'];
+			if (typeof data === 'string') onFrame(new Uint8Array(Buffer.from(data, 'base64')));
+		};
+		cdp.on('Page.screencastFrame', handler);
+		await cdp.send('Page.startScreencast', {
+			format: 'jpeg',
+			quality: o.quality,
+			maxWidth: o.width,
+			maxHeight: o.height
+		});
+		return async () => {
+			cdp.off('Page.screencastFrame', handler);
+			if (!cdp.isClosed) await cdp.send('Page.stopScreencast').catch(() => undefined);
+		};
+	}
+
+	/**
+	 * 앱 저장 상태(localStorage·sessionStorage)를 지운다. 브라우저 시뮬레이터의 "새 컨텍스트"에 해당하는 TV 쪽 초기화다.
+	 * 지운 뒤 reloadApp으로 다시 열면 앞 단계가 남긴 최근 검색어 같은 상태가 없어진다 (서버에 저장된 상태는 남는다)
+	 */
+	clearAppStorage(): Promise<{ local: boolean; session: boolean }> {
+		return this.cdp.evaluate(pageExpression(clearStorageInPage, null));
 	}
 
 	/** 앱을 다시 실행한 뒤 디버거 연결만 새로 맺는다 (SSAP 연결은 유지) */

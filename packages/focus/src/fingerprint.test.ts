@@ -191,4 +191,17 @@ describe('addedItems', () => {
 	it('없어진 요소는 새로 생긴 것이 아니다', () => {
 		expect(addedItems(['a', 'b'], ['a'])).toEqual([]);
 	});
+
+	it('다시 마운트되어 번호만 바뀐 요소는 새로 생긴 것이 아니다 (Enact "container-12")', () => {
+		expect(addedItems(['container-3', 'container-5', 'chip'], ['chip', 'container-12', 'container-14'])).toEqual(
+			[]
+		);
+	});
+
+	it('번호가 다른 요소가 더 생기면 그만큼 새로 생긴 것 (최근 검색어 항목)', () => {
+		expect(addedItems(['container-3', 'recent-1'], ['container-9', 'recent-1', 'recent-2', 'recent-3'])).toEqual([
+			'recent-2',
+			'recent-3'
+		]);
+	});
 });

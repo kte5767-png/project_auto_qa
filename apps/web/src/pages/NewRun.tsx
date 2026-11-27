@@ -172,7 +172,11 @@ export function NewRun({ running }: { running: boolean }) {
 						<span className="stepbadge">Step 3</span> 실행 환경
 					</SectionTitle>
 					<div className="envs">
-						<button className="env on" type="button">
+						<button
+							className={`env ${s.device === true ? 'off' : 'on'}`}
+							type="button"
+							onClick={() => set({ device: false })}
+						>
 							<b style={{ color: 'var(--navy)' }}>브라우저 (시뮬레이터)</b>
 							<div className="small muted">Chromium에서 앱을 열고 리모컨 키를 보냅니다 · 1920×1080</div>
 							<label className="small row" style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
@@ -192,9 +196,17 @@ export function NewRun({ running }: { running: boolean }) {
 								이미 값이 있는 P/F 칸도 다시 쓰기
 							</label>
 						</button>
-						<button className="env off" type="button" disabled>
-							<b>TV 실기기 (webOS)</b> <span className="chip waiting">준비 중</span>
-							<div className="small">개발자 모드 TV에 직접 연결해 검수합니다</div>
+						<button
+							className={`env ${s.device === true ? 'on' : 'off'}`}
+							type="button"
+							onClick={() => set({ device: true })}
+						>
+							<b style={s.device === true ? { color: 'var(--navy)' } : {}}>TV 실기기 (webOS)</b>{' '}
+							<span className="chip waiting">시험</span>
+							<div className="small">
+								개발자 모드 TV에 직접 연결해 검수합니다 · 프로젝트 .env의 WEBOS_HOST·WEBOS_APP_ID, 처음
+								한 번은 TV에서 연결 허용
+							</div>
 						</button>
 					</div>
 
@@ -241,7 +253,11 @@ export function NewRun({ running }: { running: boolean }) {
 								<span className="okdot">✓</span>
 								<div>
 									<b>실행 환경</b>
-									<div className="small muted">브라우저 · {s.headed ? '화면 보기' : '화면 없이'}</div>
+									<div className="small muted">
+										{s.device === true
+											? 'TV 실기기 (webOS)'
+											: `브라우저 · ${s.headed ? '화면 보기' : '화면 없이'}`}
+									</div>
 								</div>
 							</li>
 						</ul>

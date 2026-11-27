@@ -169,6 +169,16 @@
 			"expected": "OK를 누르면 On → Off",
 			"actual": "OK를 눌러도 On 그대로",
 			"reproKeys": ["LEFT", "OK", "RIGHT", "OK"]
+		},
+		{
+			"id": "D17",
+			"category": "spec",
+			"screen": "search",
+			"target": "search-recent-1",
+			"summary": "최근 검색어 저장 Off여도 최근 검색어 영역이 보임",
+			"expected": "Off면 최근 검색어 영역 미제공 (기록은 남김)",
+			"actual": "Off여도 최근 검색어 영역이 그대로 보임",
+			"reproKeys": ["LEFT", "OK", "DOWN", "OK", "BACK", "RIGHT", "OK"]
 		}
 	]
 }

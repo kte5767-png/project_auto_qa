@@ -292,6 +292,9 @@ importers:
       '@auto-qa/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@auto-qa/device-webos':
+        specifier: workspace:*
+        version: link:../../packages/device-webos
       '@auto-qa/figma':
         specifier: workspace:*
         version: link:../../packages/figma

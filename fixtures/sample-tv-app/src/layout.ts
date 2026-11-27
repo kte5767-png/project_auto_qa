@@ -83,6 +83,8 @@ export interface Layout {
 		resultColumns: number;
 		/** 최근 검색어 저장 On/Off 버튼이 OK로 바뀌는가 (D16은 안 바뀜) */
 		saveToggle: boolean;
+		/** 저장 Off여도 최근 검색어 영역을 보이는가 (화면설계서 4.4: Off면 영역 미제공. D17은 보임) */
+		recentWhenOff: boolean;
 	};
 }
 
@@ -157,7 +159,8 @@ export const BASE_LAYOUT: Layout = {
 		cardMarquee: true,
 		inputOverflow: 'ellipsis',
 		resultColumns: 4,
-		saveToggle: true
+		saveToggle: true,
+		recentWhenOff: false
 	}
 };
 
@@ -178,6 +181,7 @@ export function getLayout(defects: ReadonlySet<string>): Layout {
 	if (defects.has('D14')) layout.search.inputOverflow = 'clip';
 	if (defects.has('D15')) layout.search.resultColumns = 0;
 	if (defects.has('D16')) layout.search.saveToggle = false;
+	if (defects.has('D17')) layout.search.recentWhenOff = true;
 	return layout;
 }
 
