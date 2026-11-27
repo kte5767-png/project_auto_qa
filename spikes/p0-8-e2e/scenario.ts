@@ -64,6 +64,8 @@ export interface Timing {
 	maxReturnKeys: number;
 	/** 이동 지도에 길이 없을 때 방향으로 찾아갈 키 수 상한 (목표 지향 탐색) */
 	maxSearchKeys: number;
+	/** 목표가 안 보일 때(스크롤해야 나타남) 화면설계서 위치 방향으로 누를 키 수 상한 */
+	maxRevealKeys: number;
 	/** 처음 화면으로 되돌릴 때 누를 키 수 상한 (넘으면 앱을 다시 연다, D-039) */
 	maxResetKeys: number;
 	/** 포커스 없는 층(종료 토스트 등)이 사라지기를 기다리는 최대 시간 (ms) */
@@ -85,6 +87,7 @@ export const DEFAULT_TIMING: Timing = {
 	pollMs: 200,
 	maxReturnKeys: 3,
 	maxSearchKeys: 10,
+	maxRevealKeys: 30,
 	maxResetKeys: 12,
 	toastWaitMs: 4000,
 	transitionWaitMs: 5000,

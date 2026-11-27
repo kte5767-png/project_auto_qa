@@ -1096,7 +1096,8 @@ class Runner {
 	/** 목표 쪽으로 방향키 한 번 (주 축 먼저, 포커스가 안 움직이면 다른 축). 움직였으면 true */
 	private async searchStep(name: string, obs: Observation, trail: Trail[]): Promise<boolean> {
 		const t = target(obs, name);
-		if (t?.rect == null || obs.focus === null) return false;
+		if (obs.focus === null) return false;
+		if (t?.rect == null) return this.revealStep(name, obs, trail);
 		const [fx, fy, fw, fh] = obs.focus.rect;
 		const [tx, ty, tw, th] = t.rect;
 		const dx = tx + tw / 2 - (fx + fw / 2);
@@ -1108,6 +1109,35 @@ class Runner {
 		for (const key of keys) {
 			const after = await this.step(key, trail, '      탐색 ');
 			if (focusText(after) !== before) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * 목표가 화면에 안 보일 때(스크롤해야 나타남): 화면설계서 콜아웃 위치로 지금 포커스 콜아웃에서 목표 쪽 방향을 정하고,
+	 * 목표가 보이거나 포커스가 더 안 움직일 때까지 그 방향 키를 누른다 (최대 timing.maxRevealKeys). 보이게 됐으면 true
+	 */
+	private async revealStep(name: string, obs: Observation, trail: Trail[]): Promise<boolean> {
+		const { ctx } = this;
+		const def = ctx.registry.elements[name];
+		const [screen = '', no = ''] = (def?.callout ?? '').split('#');
+		const nav = ctx.navs.get(screen);
+		const want = nav?.callouts.find((c) => c.no === no)?.rect ?? null;
+		const fromNo = Object.keys(ctx.profile.screens[screen]?.callouts ?? {}).find(
+			(n) => target(obs, ctx.registry.callout(screen, n) ?? '')?.hasFocus === true
+		);
+		const from = nav?.callouts.find((c) => c.no === fromNo)?.rect ?? null;
+		if (want === null || from === null) return false;
+		const dx = want.x + want.width / 2 - (from.x + from.width / 2);
+		const dy = want.y + want.height / 2 - (from.y + from.height / 2);
+		const key: RemoteKey = Math.abs(dy) >= Math.abs(dx) ? (dy > 0 ? 'DOWN' : 'UP') : dx > 0 ? 'RIGHT' : 'LEFT';
+		let last = focusText(obs);
+		for (let i = 0; i < ctx.timing.maxRevealKeys; i++) {
+			const after = await this.step(key, trail, '      찾기 ');
+			if ((target(after, name)?.visible ?? 0) > 0) return true;
+			const now = focusText(after);
+			if (now === last) return false;
+			last = now;
 		}
 		return false;
 	}
@@ -1229,7 +1259,12 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 	}
 	ctx.live.phase('화면 표시 확인 중');
 	const entryObs = runner.current?.entryObs ?? (await runner.session.observe());
-	const obs = await runner.session.observe();
+	let obs = await runner.session.observe();
+	// 처음에 안 보이는 콜아웃(스크롤해야 나타나는 "맨 위로" 버튼 등)은 찾아가서 본다. 못 가면 안 보이는 그대로 판정
+	if ((target(obs, element)?.visible ?? 0) === 0) {
+		const miss = await runner.reach(screen, no, trail);
+		if (miss === null) obs = await runner.session.observe();
+	}
 	const t = target(obs, element);
 	const title = ctx.registry.title(screen, no);
 	const titleObs = title === undefined ? undefined : target(obs, title);
