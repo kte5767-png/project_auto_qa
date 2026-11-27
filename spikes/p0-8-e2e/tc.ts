@@ -51,6 +51,8 @@ import {
 	focusText,
 	jsonFiles,
 	loadKeyMaps,
+	note,
+	onTrail,
 	record,
 	runEntry,
 	stateChangeCount,
@@ -58,6 +60,7 @@ import {
 	viewOptions
 } from './common';
 import type { Trail } from './common';
+import { DEFAULT_LIVE_OPTIONS, LiveReporter, isRunId } from './live';
 import {
 	PROFILE_FORMAT,
 	buildRegistry,
@@ -90,7 +93,11 @@ const { values, positionals } = parseArgs({
 		/** 사람이 P/F 열에 결과를 적은 엑셀 (QA 결과 보고서 등, 실행할 TC 파일과 다른 파일) */
 		truth: { type: 'string' },
 		/** TC 파일에 이미 값이 있는 P/F·이유 칸도 덮어쓴다 (다시 검수할 때) */
-		overwrite: { type: 'boolean', default: false }
+		overwrite: { type: 'boolean', default: false },
+		/** 실행 폴더 이름 (사용자 UI가 정해 넘긴다, tc-로 시작). 없으면 시각으로 만든다 */
+		run: { type: 'string' },
+		/** 실시간 앱 화면(live.jpg)을 다시 쓰는 최소 간격 ms. 0이면 받지 않는다 (사용자 UI 미리보기용, 판정과 무관) */
+		'live-frame-ms': { type: 'string', default: String(DEFAULT_LIVE_OPTIONS.frameMs) }
 	}
 });
 const cwd = process.env['INIT_CWD'] ?? process.cwd();
@@ -147,6 +154,8 @@ interface Ctx {
 	url: string;
 	keyMaps: Map<string, KeyAction[]> | null;
 	options: KeyMapOptions;
+	/** 실행 중 상황을 사용자 UI에 알림 (판정과 무관) */
+	live: LiveReporter;
 }
 
 interface ScreenSession {
@@ -163,6 +172,8 @@ interface ScreenSession {
 interface AppSession {
 	driver: BrowserDriver;
 	home: ScreenFingerprint;
+	/** 실시간 화면 멈추기 */
+	stopView: (() => Promise<void>) | null;
 }
 
 /** 목표에 못 간 이유. again = 처음 화면부터 다시 가 보면 될 수 있음 */
@@ -208,7 +219,10 @@ class Runner {
 
 	async close(): Promise<void> {
 		this.current = null;
-		if (this.app !== null) await this.app.driver.close();
+		if (this.app !== null) {
+			await this.app.stopView?.();
+			await this.app.driver.close();
+		}
 		this.app = null;
 	}
 
@@ -217,16 +231,22 @@ class Runner {
 		await this.close();
 		const { ctx } = this;
 		this.opens++;
+		ctx.live.phase('앱 여는 중');
 		const driver = await BrowserDriver.open(ctx.browser, ctx.url);
+		// 실시간 화면은 앱이 뜨는 동안부터 보낸다 (못 받아도 검수는 그대로)
+		const stopView = ctx.live.framesOn
+			? await driver.liveView((jpeg) => ctx.live.onFrame(jpeg)).catch(() => null)
+			: null;
 		const probe = this.probe(driver);
 		// 스플래시·스켈레톤이 끝나고 포커스가 자리 잡은 뒤의 화면을 처음 화면으로 기억한다
 		const ready = await probe.settle(ctx.timing.readyTimeoutMs);
 		if (!ready.settled) {
+			await stopView?.();
 			await driver.close();
 			return '앱이 준비되지 않음 (포커스가 없거나 로딩 표시가 사라지지 않음)';
 		}
 		const home = await takeFingerprint(driver, this.reset.fingerprint);
-		this.app = { driver, home };
+		this.app = { driver, home, stopView };
 		const layers = home.layers.length > 0 ? `, 겹친 층 ${home.layers.length}` : '';
 		record(
 			trail,
@@ -292,6 +312,7 @@ class Runner {
 		const app = this.app;
 		if (app === null) return this.launch(trail);
 		const { ctx } = this;
+		ctx.live.phase('처음 화면으로 되돌리는 중');
 		const state = { top: 0 };
 		// 화면에는 한 줄로 요약한다 (키마다의 이유는 리포트 기록에만)
 		const keys: string[] = [];
@@ -348,7 +369,7 @@ class Runner {
 			}
 			if (step.closes === 'popup' || noEffect) state.top++;
 			keys.push(KEY_LABEL[step.key] ?? step.key);
-			trail.push({
+			note(trail, {
 				key: step.key,
 				focus: noEffect ? `${step.reason} (반응 없음 → 최상위)` : step.reason,
 				stable: st.stable
@@ -367,6 +388,7 @@ class Runner {
 		// 진입 경로를 밟기 전까지 앱 상태를 바꾼 동작 수 (0이면 깨끗한 앱에서 들어감)
 		const changesBefore = stateChangeCount(this.app.driver);
 		const enter = async (): Promise<string | null> => {
+			ctx.live.phase(`${screen} 화면으로 들어가는 중`);
 			const e = await runEntry(
 				session,
 				entryPath(ctx.profile, ctx.registry, screen),
@@ -542,6 +564,7 @@ class Runner {
 
 	private async tryReach(screen: string, no: string, trail: Trail[]): Promise<Miss | null> {
 		const { ctx } = this;
+		ctx.live.phase(`목표 ${calloutMark(no)} 찾아가는 중`);
 		const name = ctx.registry.callout(screen, no) ?? '';
 		const at = (o: Observation): boolean => {
 			const t = target(o, name);
@@ -651,7 +674,7 @@ function subsetSubject(text: string, names: readonly string[], options: KeyMapOp
 
 type OkCheck = { clause: Clause; check: Check; after: 'transition' | 'no-action' | 'presence' | 'focus' };
 
-async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Promise<StepRun> {
+async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, trail: Trail[]): Promise<StepRun> {
 	const { ctx } = runner;
 	const started = Date.now();
 	const screen = c.specRef?.screenId ?? '';
@@ -665,7 +688,6 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 		screen,
 		callout: no
 	};
-	const trail: Trail[] = [];
 	const notRun = (why: string): StepRun => ({
 		...base,
 		status: 'not-run',
@@ -687,6 +709,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 		const error = await runner.open(screen, trail);
 		if (error !== null) return notRun(`진입 실패: ${error}`);
 	}
+	ctx.live.phase('화면 표시 확인 중');
 	const entryObs = runner.current?.entryObs ?? (await runner.session.observe());
 	const obs = await runner.session.observe();
 	const t = target(obs, element);
@@ -844,6 +867,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 			continue;
 		}
 		const miss = await runner.reach(screen, no, trail);
+		ctx.live.phase(`키 ${KEY_LABEL[key] ?? key} 동작 확인 중`);
 		if (miss !== null) {
 			blocked = miss.reason;
 			results.push(res(clause, check, 'needs-review', miss.reason));
@@ -874,6 +898,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string): Pr
 		if (miss !== null) {
 			for (const { clause, check } of okChecks) results.push(res(clause, check, 'needs-review', miss.reason));
 		} else {
+			ctx.live.phase('선택(OK) 결과 확인 중');
 			const before = await runner.session.observe();
 			const r = await runner.session.press('OK');
 			record(trail, { key: 'OK', focus: focusText(r.obs), stable: r.stable }, '    ');
@@ -1239,23 +1264,15 @@ async function main(): Promise<void> {
 	console.log(`TC ${basename(tcPath)}: 화면 ${prefix}.x 자동 대상 단계 ${selected.length}개`);
 
 	const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-	const out = join(resolve(cwd, values.out), `tc-${stamp}`);
+	const runId = values.run ?? `tc-${stamp}`;
+	if (!isRunId(runId)) throw new Error(`--run은 tc-로 시작하는 폴더 이름이어야 합니다: ${runId}`);
+	const out = join(resolve(cwd, values.out), runId);
 	await mkdir(out, { recursive: true });
-	const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
-	const browser = await launchBrowser({ headless: !values.headed, windowScale });
-	const ctx: Ctx = {
-		browser,
-		profile,
-		registry,
-		timing: { ...DEFAULT_TIMING, ...profile.timing },
-		pauseMs,
-		url: values.url ?? profile.url,
-		keyMaps,
-		options
-	};
+	const frameMs = Number(values['live-frame-ms']);
+	if (!Number.isFinite(frameMs) || frameMs < 0) throw new Error('--live-frame-ms는 0 이상의 숫자(ms)입니다');
+
+	// 사용자 UI(apps/web)가 실행 중 상황을 읽는 파일: 키 하나·하는 일이 바뀔 때마다 다시 쓴다 (live.ts)
 	const steps: StepRun[] = [];
-	const runner = new Runner(ctx);
-	// 사용자 UI(apps/web)가 실행 중 상황을 읽는 파일: 단계가 끝날 때마다 다시 쓴다
 	const startedAt = new Date().toISOString();
 	const planned = selected.map(([c, s]) => ({
 		key: `${c.sheet}!${s.row}`,
@@ -1263,56 +1280,89 @@ async function main(): Promise<void> {
 		callout: s.targetRef?.callout ?? null,
 		label: s.targetRef?.label ?? c.title ?? ''
 	}));
-	const progress = async (current: string | null, finished: boolean): Promise<void> => {
-		const body = {
+	const url = values.url ?? profile.url;
+	const live = new LiveReporter(
+		out,
+		() => ({
 			format: PROGRESS_FORMAT,
-			version: 1,
+			version: 2,
 			tc: basename(tcPath),
 			tcPath,
-			url: ctx.url,
+			url,
 			startedAt,
-			updatedAt: new Date().toISOString(),
-			finished,
-			current,
 			planned,
 			steps
-		};
-		await writeFile(join(out, 'progress.json'), `${JSON.stringify(body)}\n`);
-	};
-	try {
-		for (const [c, s] of selected) {
-			const label = `${c.sheet}!${s.row} ${c.specRef?.screenId ?? ''} ${s.targetRef === null ? '' : calloutMark(s.targetRef.callout)} ${s.targetRef?.label ?? ''}`;
-			console.log(`  ${label}`);
-			await progress(`${c.sheet}!${s.row}`, false);
-			const run = await runStep(runner, c, s, out);
-			steps.push(run);
-			console.log(
-				`    = ${STATUS_LABEL[run.status]} — ${run.explanation.split('\n')[0] ?? ''} (${(run.ms / 1000).toFixed(1)}초)`
-			);
-		}
-	} finally {
-		await runner.close();
-		await browser.close();
-		await progress(null, true);
-	}
-	console.log(
-		`앱을 연 횟수: ${runner.opens} (남은 상태 때문에 ${runner.cleanRelaunches}) · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}` +
-			(runner.dynamic.size > 0 ? ` · 콘텐츠가 바뀌어 상태 비교를 뺀 화면: ${[...runner.dynamic].join(', ')}` : '')
+		}),
+		{ ...DEFAULT_LIVE_OPTIONS, frameMs }
 	);
+	live.stage('preparing', '브라우저 여는 중');
+	await live.flush();
+	onTrail(() => live.touch());
 
-	console.log(`\nTC 파일에 결과 쓰기 (${basename(tcPath)}):\n${await writeResults(tcPath, steps, values.overwrite)}`);
-	const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));
-	if (sc !== null) console.log(scoreText(sc).join('\n'));
-	await writeFile(join(out, 'report.md'), report(profile, ctx.url, basename(tcPath), steps, sc));
-	await writeFile(
-		join(out, 'result.json'),
-		`${JSON.stringify({ format: RESULT_FORMAT, version: 1, tc: basename(tcPath), url: ctx.url, steps }, null, '\t')}\n`
-	);
-	const count = (st: StepStatus): number => steps.filter((x) => x.status === st).length;
-	console.log(
-		`단계 ${steps.length}개 — Pass ${count('pass')} · Fail ${count('fail')} · 확인 필요 ${count('needs-review')} · 미실행 ${count('not-run')}`
-	);
-	console.log(`→ ${join(out, 'report.md')}\n→ ${tcPath}`);
+	let completed = false;
+	try {
+		const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
+		const browser = await launchBrowser({ headless: !values.headed, windowScale });
+		const ctx: Ctx = {
+			browser,
+			profile,
+			registry,
+			timing: { ...DEFAULT_TIMING, ...profile.timing },
+			pauseMs,
+			url,
+			keyMaps,
+			options,
+			live
+		};
+		const runner = new Runner(ctx);
+		try {
+			for (const [c, s] of selected) {
+				const key = `${c.sheet}!${s.row}`;
+				const label = `${key} ${c.specRef?.screenId ?? ''} ${s.targetRef === null ? '' : calloutMark(s.targetRef.callout)} ${s.targetRef?.label ?? ''}`;
+				console.log(`  ${label}`);
+				const trail: Trail[] = [];
+				live.begin(key, trail);
+				const run = await runStep(runner, c, s, out, trail);
+				steps.push(run);
+				live.end();
+				console.log(
+					`    = ${STATUS_LABEL[run.status]} — ${run.explanation.split('\n')[0] ?? ''} (${(run.ms / 1000).toFixed(1)}초)`
+				);
+			}
+		} finally {
+			live.stage('writing', '앱 닫는 중');
+			await runner.close();
+			await browser.close();
+		}
+		console.log(
+			`앱을 연 횟수: ${runner.opens} (남은 상태 때문에 ${runner.cleanRelaunches}) · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}` +
+				(runner.dynamic.size > 0
+					? ` · 콘텐츠가 바뀌어 상태 비교를 뺀 화면: ${[...runner.dynamic].join(', ')}`
+					: '')
+		);
+
+		live.phase('TC 파일에 결과 쓰는 중');
+		console.log(
+			`\nTC 파일에 결과 쓰기 (${basename(tcPath)}):\n${await writeResults(tcPath, steps, values.overwrite)}`
+		);
+		const sc = values.truth === undefined ? null : score(steps, await readTruth(resolve(cwd, values.truth)));
+		if (sc !== null) console.log(scoreText(sc).join('\n'));
+		live.phase('리포트 쓰는 중');
+		await writeFile(join(out, 'report.md'), report(profile, url, basename(tcPath), steps, sc));
+		await writeFile(
+			join(out, 'result.json'),
+			`${JSON.stringify({ format: RESULT_FORMAT, version: 1, tc: basename(tcPath), url, steps }, null, '\t')}\n`
+		);
+		const count = (st: StepStatus): number => steps.filter((x) => x.status === st).length;
+		console.log(
+			`단계 ${steps.length}개 — Pass ${count('pass')} · Fail ${count('fail')} · 확인 필요 ${count('needs-review')} · 미실행 ${count('not-run')}`
+		);
+		console.log(`→ ${join(out, 'report.md')}\n→ ${tcPath}`);
+		completed = true;
+	} finally {
+		onTrail(null);
+		await live.finish(completed);
+	}
 }
 
 main().catch((e: unknown) => {

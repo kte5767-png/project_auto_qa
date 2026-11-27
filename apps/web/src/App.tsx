@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api } from './api';
-import type { LiveState } from './api';
 import { Dashboard } from './pages/Dashboard';
 import { LiveRun } from './pages/LiveRun';
 import { NewRun } from './pages/NewRun';
 import { Result } from './pages/Result';
+import { useLiveStream } from './useLiveStream';
 
 export type Route = { page: 'home' } | { page: 'new' } | { page: 'live' } | { page: 'result'; id: string | null };
 
@@ -22,27 +21,14 @@ export function go(path: string): void {
 
 export function App() {
 	const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
-	const [live, setLive] = useState<LiveState | null>(null);
+	// 진행·로그·실시간 화면은 서버가 바뀌는 즉시 밀어 준다 (SSE)
+	const stream = useLiveStream();
+	const live = stream.live;
 
 	useEffect(() => {
 		const on = (): void => setRoute(parse(window.location.hash));
 		window.addEventListener('hashchange', on);
 		return () => window.removeEventListener('hashchange', on);
-	}, []);
-
-	useEffect(() => {
-		let alive = true;
-		const tick = (): void => {
-			api.live()
-				.then((s) => alive && setLive(s))
-				.catch(() => undefined);
-		};
-		tick();
-		const t = setInterval(tick, 2000);
-		return () => {
-			alive = false;
-			clearInterval(t);
-		};
 	}, []);
 
 	const running = live?.running === true;
@@ -72,7 +58,7 @@ export function App() {
 			</header>
 			{route.page === 'home' && <Dashboard live={live} />}
 			{route.page === 'new' && <NewRun running={running} />}
-			{route.page === 'live' && <LiveRun live={live} />}
+			{route.page === 'live' && <LiveRun stream={stream} />}
 			{route.page === 'result' && <Result id={route.id} />}
 			<footer className="foot">
 				<span>

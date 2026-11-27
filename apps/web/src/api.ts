@@ -39,6 +39,9 @@ export interface Planned {
 	label: string;
 }
 
+/** 실행 전체의 단계: 준비(TC·브라우저) → 실행 → TC 파일에 결과 쓰기 → 끝 */
+export type RunStage = 'preparing' | 'running' | 'writing' | 'done';
+
 export interface Run {
 	id: string;
 	tc: string;
@@ -51,6 +54,16 @@ export interface Run {
 	planned: Planned[] | null;
 	steps: Step[];
 	decisions?: Record<string, 'pass' | 'fail'>;
+	/** 아래는 진행 파일 version 2부터 (단계 안의 실시간 상황) */
+	stage?: RunStage;
+	/** 단계 안에서 지금 하는 일 (앱 열기·진입·키 확인 등) */
+	phase?: string | null;
+	currentStartedAt?: string | null;
+	/** 지금 단계에서 지금까지 누른 키·동작 */
+	currentTrail?: TrailItem[];
+	/** 중지·오류로 단계 도중에 끝남 */
+	stopped?: boolean;
+	exitCode?: number;
 }
 
 export interface Settings {
@@ -62,11 +75,14 @@ export interface Settings {
 	overwrite: boolean;
 }
 
+/** 이 화면(웹 서버)에서 띄운 검수 프로세스 */
 export interface LiveState {
 	running: boolean;
 	exitCode: number | null;
 	startedAt: string | null;
-	log: string[];
+	runId: string | null;
+	/** 중지 버튼으로 멈춤 */
+	stopped: boolean;
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -78,7 +94,7 @@ async function json<T>(res: Response): Promise<T> {
 export const api = {
 	runs: () => fetch('/api/runs').then((r) => json<Run[]>(r)),
 	run: (id: string) => fetch(`/api/runs/${id}`).then((r) => json<Run>(r)),
-	live: () => fetch('/api/live').then((r) => json<LiveState>(r)),
+	streamUrl: '/api/stream',
 	settings: () => fetch('/api/settings').then((r) => json<Settings>(r)),
 	check: (path: string) =>
 		fetch(`/api/check?path=${encodeURIComponent(path)}`).then((r) => json<{ exists: boolean }>(r)),
@@ -87,7 +103,9 @@ export const api = {
 			json<{ ok: boolean; status: number; ms: number }>(r)
 		),
 	start: (s: Settings) =>
-		fetch('/api/run', { method: 'POST', body: JSON.stringify(s) }).then((r) => json<{ startedAt: string }>(r)),
+		fetch('/api/run', { method: 'POST', body: JSON.stringify(s) }).then((r) =>
+			json<{ startedAt: string; runId: string }>(r)
+		),
 	stop: () => fetch('/api/stop', { method: 'POST' }).then((r) => json<{ stopped: boolean }>(r)),
 	decide: (id: string, decisions: Record<string, 'pass' | 'fail'>) =>
 		fetch(`/api/runs/${id}/decisions`, { method: 'POST', body: JSON.stringify(decisions) }).then((r) =>
