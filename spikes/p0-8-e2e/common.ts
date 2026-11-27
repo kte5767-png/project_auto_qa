@@ -611,3 +611,12 @@ export async function viewOptions(
 	if (!(pauseMs >= 0)) throw new Error(`--slow는 0 이상의 ms: ${String(slow)}`);
 	return { windowScale, pauseMs };
 }
+
+/** "X 미노출"의 X: 없어야 하는 말과 괄호 보충을 뺀 나머지 */
+export function absenceSubject(text: string): string {
+	return text
+		.replace(/\([^()]*\)/g, ' ')
+		.replace(/(?:미노출|미제공|노출(?:되지|하지)\s*않\S*|제공(?:되지|하지)\s*않\S*)[\s\S]*$/, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}

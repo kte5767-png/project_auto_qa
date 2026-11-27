@@ -1,6 +1,6 @@
 import type { Observation, ObservedTarget } from '@auto-qa/focus';
 import { describe, expect, it } from 'vitest';
-import { itemByText } from './common';
+import { absenceSubject, itemByText } from './common';
 
 /** 합성 관찰 (회사 자료 아님): 카테고리 목록과 결과 목록 */
 function list(name: string, items: string[], focusItem = -1): ObservedTarget {
@@ -63,5 +63,14 @@ describe('itemByText', () => {
 				scope.map(([n, d]) => [n, { ...d }])
 			)
 		).toBeNull();
+	});
+});
+
+describe('absenceSubject', () => {
+	it('없어야 하는 말과 괄호 보충을 빼고 요소 이름만 남긴다', () => {
+		expect(absenceSubject('좌상단에 들어가는 CP 아이콘 미노출 (예외처리)')).toBe('좌상단에 들어가는 CP 아이콘');
+		expect(absenceSubject('‘All’ 버튼 미제공')).toBe('‘All’ 버튼');
+		expect(absenceSubject('최근 검색어 영역 제공하지 않음')).toBe('최근 검색어 영역');
+		expect(absenceSubject('미노출')).toBe('');
 	});
 });

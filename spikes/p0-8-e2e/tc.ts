@@ -72,6 +72,7 @@ import {
 	DEFAULT_LOADING_SELECTOR,
 	KEY_LABEL,
 	Session,
+	absenceSubject,
 	checkSpecMove,
 	focusText,
 	jsonFiles,
@@ -643,6 +644,29 @@ async function checkMotion(
 function nameScope(registry: ElementRegistry, screen: string, before: Observation): Record<string, ElementDef> {
 	const shown = Object.entries(registry.upstream(screen)).filter(([n]) => (target(before, n)?.visible ?? 0) > 0);
 	return { ...registry.scoped(screen), ...Object.fromEntries(shown) };
+}
+
+/**
+ * "X 미노출": X를 이 화면(과 보이는 앞 화면) 요소 이름에서 찾아, 그 요소가 보이지 않으면 Pass.
+ * "~경우·~때" 조건이 붙으면 그 상태를 만든 뒤 봐야 하므로 확인 필요. 이름에 맞는 요소가 없으면 확인 필요 (추측하지 않음)
+ */
+function checkAbsence(ctx: Ctx, screen: string, obs: Observation, clause: Clause, check: Check): CheckResult {
+	if (/경우|(?:일|할|인|될)\s*때/.test(clause.text)) {
+		return res(clause, check, 'needs-review', '조건에 따른 미노출 — 그 조건을 만든 뒤 봐야 함 (아직 없음)');
+	}
+	const subject = absenceSubject(clause.text);
+	if (subject === '') return res(clause, check, 'needs-review', '없어야 하는 요소 이름이 문장에 없음');
+	const scope = Object.entries(nameScope(ctx.registry, screen, obs));
+	const m = matchByName(subject, scope, ([n, e]) => [n, ...(e.names ?? [])], ctx.options);
+	if (m === null) {
+		return res(clause, check, 'needs-review', `"${subject}"에 대응된 요소가 없어 없는지 확인할 수 없음`);
+	}
+	const [element] = m.match;
+	const t = target(obs, element);
+	if (t === undefined) return res(clause, check, 'needs-review', `${element}을(를) 관찰하지 않아 확인할 수 없음`);
+	return t.visible === 0
+		? res(clause, check, 'pass', `${element} 안 보임 ("${subject}")`)
+		: res(clause, check, 'fail', `${element}이(가) 보임 (${t.visible}개) — "${subject}"는 없어야 함`);
 }
 
 /**
@@ -1469,6 +1493,9 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 					break;
 				case 'toggle':
 					toggleChecks.push({ clause, check });
+					break;
+				case 'absence':
+					results.push(checkAbsence(ctx, screen, obs, clause, check));
 					break;
 				case 'layout': {
 					if (!shown) results.push(res(clause, check, 'fail', `${element}이(가) 보이지 않음`));
