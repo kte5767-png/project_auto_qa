@@ -44,9 +44,13 @@ export const PROMO = {
 };
 
 export const SEARCH_KEYWORDS = ['Walking in Bali', 'Driving in Hong Kong', 'Place in China', 'Romantic', 'Family'];
-export const SEARCH_CARDS: Item[] = ['Ubud Rice Terraces', 'Victoria Peak', 'Great Wall', 'Santorini', 'Lake Bled'].map(
-	(title, i) => ({ id: `search-card-${i + 1}`, title, hue: (i * 53 + 20) % 360 })
-);
+export const SEARCH_CARDS: Item[] = [
+	'Ubud Rice Terraces',
+	'Victoria Peak',
+	'Great Wall',
+	'Santorini Sunset Cliffs and Blue Domes',
+	'Lake Bled'
+].map((title, i) => ({ id: `search-card-${i + 1}`, title, hue: (i * 53 + 20) % 360 }));
 
 /** 검색 결과 찾기용 낱말 (카드 제목과 함께 본다) */
 const SEARCH_TAGS: Record<string, string> = {

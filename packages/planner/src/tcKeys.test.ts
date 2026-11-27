@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { expectAfterKey } from './expect';
 import { buildKeyMap, describeEffect } from './keymap';
 import type { NavCallout, NavScreen } from './keymap';
-import { keyClauseText, overrideKeyTexts, withCalloutNames } from './tcKeys';
+import { keyClauseText, overrideKeyTexts, resolveAbsentCondition, withCalloutNames } from './tcKeys';
 
 const MEMORY = ' (이동한 이력이 있을 경우: 마지막 포커스한 콘텐츠에 이동)';
 
@@ -125,5 +125,39 @@ describe('overrideKeyTexts (TC 기준 판정, D-046)', () => {
 	it('출발 콜아웃이 없거나 TC 문장이 비면 그대로 둔다', () => {
 		expect(overrideKeyTexts(actions, screen, '9', { down: '[▼] 동작 없음' }).actions).toEqual(actions);
 		expect(overrideKeyTexts(actions, screen, '4', { down: '[▼]' }).actions).toEqual(actions);
+	});
+});
+
+describe('resolveAbsentCondition (TC "X가 없을 경우 Y")', () => {
+	const UP = '[▲] 최근검색어에 포커스 / 최근검색어가 없을 경우 추천검색어의 라스트포커스로 이동';
+
+	it('X가 화면에 없으면 Y 문장으로 판정한다', () => {
+		expect(resolveAbsentCondition(UP, () => false)).toEqual({
+			text: '[▲] 추천검색어의 라스트포커스로 이동',
+			note: '최근검색어이(가) 화면에 없어 "추천검색어의 라스트포커스로 이동"로 판정'
+		});
+	});
+
+	it('X가 있으면 앞 문장 (다른 조건은 남김)', () => {
+		const t =
+			'[▼] Recent 첫 번째 항목 / 이동한 이력이 있을 경우: 마지막 포커스한 콘텐츠에 이동 / Recent가 없을 경우 Keywords로 이동';
+		expect(resolveAbsentCondition(t, () => true).text).toBe(
+			'[▼] Recent 첫 번째 항목 / 이동한 이력이 있을 경우: 마지막 포커스한 콘텐츠에 이동'
+		);
+	});
+
+	it('그런 요소를 모르거나 조건이 없으면 그대로', () => {
+		expect(resolveAbsentCondition(UP, () => null)).toEqual({ text: UP, note: null });
+		expect(resolveAbsentCondition('[▲] Search box 포커스', () => false)).toEqual({
+			text: '[▲] Search box 포커스',
+			note: null
+		});
+	});
+
+	it('조건을 고른 뒤의 문장은 이름(붙여 쓴 이름)과 라스트포커스(이력)로 읽힌다', () => {
+		const screen = withCalloutNames(specScreen(), '9.2', { '2': ['추천 검색어'], '6': ['맨 위로'] });
+		const resolved = resolveAbsentCondition(UP, () => false).text;
+		const o = overrideKeyTexts(buildKeyMap(screen), screen, '6', { up: resolved });
+		expect(describeEffect(o.tc.up?.effect ?? { kind: 'unknown' })).toBe('move:2:first+memory');
 	});
 });

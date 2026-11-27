@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Focusable, useApp } from '../AppContext';
 import { SEARCH_CARDS, SEARCH_KEYWORDS, gradientOf, searchCards } from '../data';
@@ -21,8 +21,27 @@ const ESCAPE_KEY_CODE = 27;
  * (TV에서는 VKB가 열림), 글자는 플랫폼 키보드나 입력 이벤트로 들어온다. Enter = 검색, Back = 편집 끝.
  * 검색하면 결과(4.5) 또는 결과 없음 + 추천 키워드(4.6)를 보여 준다. 앞뒤 공백은 지운다(4.8).
  */
+/**
+ * 카드 제목. 칸을 넘치면 말줄임하고, 카드에 포커스가 2초 머물면 흐르는 글자(Marquee)로 보여 준다 (화면설계서 4.2 ②·③ 형식).
+ * 넘치는지는 그린 뒤 재서 정한다. marquee=false(D13)이면 말줄임만 한다
+ */
+function CardTitle({ text, marquee, testId }: { text: string; marquee: boolean; testId: string }) {
+	const ref = useRef<HTMLSpanElement>(null);
+	const [overflowing, setOverflowing] = useState(false);
+	useLayoutEffect(() => {
+		const el = ref.current;
+		if (el !== null) setOverflowing(el.scrollWidth > el.clientWidth + 1);
+	}, [text]);
+	return (
+		<span ref={ref} className={`search-card-title${overflowing && marquee ? ' marquee' : ''}`} data-testid={testId}>
+			{text}
+		</span>
+	);
+}
+
 export function SearchScreen({ onBack }: SearchScreenProps) {
-	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch } = useApp();
+	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch, saveRecent, setSaveRecent } =
+		useApp();
 	// 최근 검색어가 있으면 그 줄이 맨 위에 생기고 아래 섹션이 내려간다 (화면설계서 4.3)
 	const shift = recentSearches.length > 0 ? 162 : 0;
 	const { search } = layout;
@@ -119,6 +138,7 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 				<input
 					ref={inputRef}
 					data-testid="search-field"
+					style={{ textOverflow: search.inputOverflow }}
 					placeholder={search.placeholder}
 					readOnly={!editing}
 					tabIndex={-1}
@@ -127,6 +147,30 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 					onChange={(event) => setQuery(event.target.value)}
 					onKeyDown={onInputKeyDown}
 				/>
+			</Focusable>
+			{/* 최근 검색어 저장 On/Off (화면설계서 4.4를 검색창 옆 버튼으로 줄임). D16은 OK를 눌러도 안 바뀜 */}
+			<Focusable
+				id="search-save"
+				testId="search-save"
+				className="search-save"
+				style={{
+					left: search.fieldLeft + search.fieldWidth + 24,
+					top: search.fieldTop,
+					width: 300,
+					height: search.fieldHeight
+				}}
+				onSelect={() => {
+					if (search.saveToggle) setSaveRecent(!saveRecent);
+				}}
+			>
+				<span>Save history</span>
+				<span
+					role="switch"
+					aria-checked={saveRecent}
+					className={saveRecent ? 'search-switch on' : 'search-switch'}
+				>
+					{saveRecent ? 'On' : 'Off'}
+				</span>
 			</Focusable>
 
 			{submitted === null && (
@@ -183,7 +227,7 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 								background: gradientOf(card.hue)
 							}}
 						>
-							<span className="search-card-title">{card.title}</span>
+							<CardTitle text={card.title} marquee={search.cardMarquee} testId={`${card.id}-title`} />
 						</Focusable>
 					))}
 				</>
@@ -201,14 +245,19 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 							testId={`search-result-${i + 1}`}
 							className="search-card"
 							style={{
-								left: 210 + i * 400,
-								top: 246,
+								// 그리드(화면설계서 4.5). resultColumns 0(D15)은 한 줄 가로 목록
+								left: 210 + (search.resultColumns > 0 ? i % search.resultColumns : i) * 400,
+								top: 246 + (search.resultColumns > 0 ? Math.floor(i / search.resultColumns) : 0) * 236,
 								width: 388,
 								height: 216,
 								background: gradientOf(card.hue)
 							}}
 						>
-							<span className="search-card-title">{card.title}</span>
+							<CardTitle
+								text={card.title}
+								marquee={search.cardMarquee}
+								testId={`search-result-${i + 1}-title`}
+							/>
 						</Focusable>
 					))}
 				</>

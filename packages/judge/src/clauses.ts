@@ -23,16 +23,22 @@ export type CheckKind =
 	| 'presence'
 	/** 말줄임 */
 	| 'ellipsis'
-	/** 움직임·시간 (Marquee, N초 뒤) */
+	/** 움직임·시간 (Marquee, N초 뒤). value: 기다릴 초(없으면 null), 움직이지 않아야 하면 'still' */
 	| 'motion'
+	/** 리모컨 전용 조작 (More Action 버튼, 포인터) — 브라우저 시뮬레이터에는 없다 */
+	| 'remote'
 	/** 화면 전환 */
 	| 'transition'
 	/** 가상 키보드 호출 */
 	| 'keyboard'
 	/** 선택해도 동작 없음 */
 	| 'no-action'
-	/** 조작 → 결과 (선택 시 닫힘, On/Off 가능, 루프 안 됨) */
+	/** 조작 → 결과 (선택 시 닫힘, 루프 안 됨) */
 	| 'behavior'
+	/** OK로 켜고 끄기 (On/Off 가능) — OK 전후 상태 표시가 바뀌고 다시 OK로 돌아오는지 */
+	| 'toggle'
+	/** 목록 배치 (그리드·타일 형태). value: 'grid' */
+	| 'layout'
 	/** 요소가 없어야 함 (미노출) */
 	| 'absence'
 	/** 글자 입력이 필요한 조건 (지금 계획 범위 밖) */
@@ -70,6 +76,19 @@ export interface ClauseOptions {
 	referenceWords: string[];
 	/** 글자 입력이 필요한 조건 */
 	inputWords: string[];
+	/**
+	 * 글자 입력 조건 중 입력란 모양으로 확인할 수 있는 것 (정규식 원문 → 확인 종류). value가 "max"면 첫 괄호가 글자 수.
+	 * max: 글자 수 상한 / trim: 앞뒤 공백 제거 / ellipsis: 넘치면 말줄임 / tail: 입력 중 최근 글자가 보임 / head: 검색 뒤 처음부터 표시
+	 */
+	inputRules: { pattern: string; value: 'max' | 'trim' | 'ellipsis' | 'tail' | 'head' }[];
+	/** 리모컨 전용 조작 (방향키·OK·Back 밖의 버튼, 포인터) */
+	remoteWords: string[];
+	/** OK로 켜고 끄는 조건 (정규식 원문, 대소문자 무시) */
+	togglePatterns: string[];
+	/** 그리드(타일) 배치 조건 (정규식 원문, 대소문자 무시) */
+	gridPatterns: string[];
+	/** 항목 종류에 따른 조건 ("이미지 콘텐츠일 경우 …") — 화면에서 항목 종류를 구분하지 않으므로 문장 전체를 확인하지 않는다 */
+	itemTypeWords: string[];
 	/** "표시 내용"처럼 있는지 확인할 묶음 제목 */
 	presenceSections: string[];
 	/** 문장 끝이 이 낱말이면 그 요소가 있는지 확인 */
@@ -121,6 +140,21 @@ export const DEFAULT_CLAUSE_OPTIONS: ClauseOptions = {
 	],
 	referenceWords: ['정책을 따름', '참고', '시나리오 문서'],
 	inputWords: ['입력 가능 글자', '입력값', '공백 입력', '입력할 때'],
+	inputRules: [
+		{ pattern: '최대\\s*입력\\s*가능\\s*글자\\s*수\\s*[:：]?\\s*(\\d+)\\s*자', value: 'max' },
+		{ pattern: '(?:선행|앞).{0,6}(?:후행|뒤).{0,6}공백.{0,6}(?:자동\\s*)?(?:제거|삭제)', value: 'trim' },
+		{ pattern: '입력값이\\s*(?:영역|칸)을?\\s*(?:벗어날|초과할|넘을)\\s*경우.{0,12}말줄임', value: 'ellipsis' },
+		{ pattern: '입력할\\s*때.{0,20}최근\\s*입력된\\s*글자가?\\s*오른쪽에?\\s*유지', value: 'tail' },
+		{ pattern: '검색\\s*후에?는?\\s*입력값의?\\s*처음부터\\s*표시', value: 'head' }
+	],
+	remoteWords: ['More Action', 'MRCU', '포인터', '매직 리모컨', '매직리모컨'],
+	togglePatterns: [
+		'on\\s*/\\s*off\\s*(?:가능|전환|변경\\s*가능)',
+		'켜기\\s*/\\s*끄기\\s*가능',
+		'(?:선택|체크)\\s*/\\s*해제\\s*가능'
+	],
+	gridPatterns: ['그리드', '타일\\s*형태', '\\bgrid\\b'],
+	itemTypeWords: ['콘텐츠일 경우', '콘텐츠인 경우', '콘텐츠의 경우', '콘텐츠일 때', '콘텐츠인 때'],
 	presenceSections: ['표시 내용', '표시'],
 	presenceEndings: ['제공', '노출', '표시', '제공됨', '노출됨', '표시됨']
 };
@@ -213,8 +247,27 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 	if (rule !== undefined) add('data', 'none', rule, `검색·편성 규칙 ("${rule}")`);
 	const input = has(body, options.inputWords);
 	if (input !== undefined) {
-		// 글자 입력이 있어야 확인할 수 있는 조건 — 같은 문장의 다른 조건도 입력이 먼저다
+		// 글자 입력이 있어야 확인할 수 있는 조건 — 같은 문장의 다른 조건도 입력이 먼저다.
+		// 입력란 모양으로 확인할 수 있는 것(글자 수 상한, 공백 제거, 말줄임, 보이는 위치)은 코드로, 나머지는 확인 불가
+		for (const r of options.inputRules) {
+			const m = new RegExp(r.pattern, 'i').exec(body);
+			if (m === null) continue;
+			const value = r.value === 'max' ? `max:${m[1] ?? ''}` : r.value;
+			add('input', 'code', value, `입력란 조건 (${value}) — 글자를 넣고 입력란 모양을 봄`);
+		}
+		if (checks.some((c) => c.kind === 'input')) return checks;
 		add('input', 'none', input, `글자 입력 조작이 필요 ("${input}") — 지금 계획 범위 밖`);
+		return checks;
+	}
+	const itemType = has(body, options.itemTypeWords);
+	if (itemType !== undefined) {
+		add('data', 'none', itemType, `항목 종류에 따른 조건 ("${itemType}") — 화면에서 항목 종류를 구분하지 않음`);
+		return checks;
+	}
+	const remote = has(body, options.remoteWords);
+	if (remote !== undefined) {
+		// 리모컨 전용 버튼·포인터로 하는 조작 — 그 조작의 결과도 그 리모컨이 있어야 본다
+		add('remote', 'code', remote, `리모컨 전용 조작 ("${remote}")`);
 		return checks;
 	}
 
@@ -225,7 +278,13 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 	if (max !== null) add('count', 'code', Number(max[1]), `개수 ${max[1]}`);
 	if (rule === undefined) {
 		if (/말줄임/.test(body)) add('ellipsis', 'code', null, '말줄임 (DOM 넘침·text-overflow)');
-		if (/marquee|\d+\s*초\s*(뒤|후)/i.test(body)) add('motion', 'code', null, '움직임·시간 (DOM 위치 변화)');
+		if (/marquee|\d+\s*초\s*(뒤|후)/i.test(body)) {
+			const still =
+				/marquee\S*\s*(?:(?:적용|제공|동작)\s*)?(?:되지|하지)\s*않|marquee\S*\s*(?:미적용|없음)/i.test(body);
+			const sec = /(\d+(?:\.\d+)?)\s*초\s*(?:뒤|후)/.exec(body);
+			if (still) add('motion', 'code', 'still', '움직이지 않아야 함 (DOM 위치 변화 없음)');
+			else add('motion', 'code', sec === null ? null : Number(sec[1]), '움직임·시간 (DOM 위치 변화)');
+		}
 		if (
 			/포커스(되어|가|를|된|로)?\s*(제공|위치|이동|유지)|default\s*포커스|커서가?\s*제공|에\s*포커스\s*$/i.test(
 				body
@@ -237,14 +296,21 @@ export function classifyClause(clause: Clause, options: ClauseOptions = DEFAULT_
 		if (/VKB|키보드/.test(body) && /호출/.test(body))
 			add('keyboard', 'code', null, '가상 키보드 호출 (키보드 상태 이벤트)');
 		if (/선택\s*불가/.test(body)) add('no-action', 'code', null, 'OK를 눌러도 동작 없음');
-		if (/미노출|노출되지\s*않|제공하지\s*않/.test(body)) add('absence', 'code', null, '요소가 없어야 함');
+		const still = checks.some((c) => c.kind === 'motion' && c.value === 'still');
+		if (/미노출|노출되지\s*않|제공하지\s*않/.test(body) && !still) add('absence', 'code', null, '요소가 없어야 함');
+		const toggle = options.togglePatterns.some((p) => new RegExp(p, 'i').test(body));
+		if (toggle) add('toggle', 'code', null, 'OK로 켜고 끄기 (OK 전후 상태 표시 비교, 다시 OK로 되돌림)');
+		const grid = options.gridPatterns.some((p) => new RegExp(p, 'i').test(body));
+		if (grid) add('layout', 'code', 'grid', '그리드 배치 (보이는 항목의 줄·칸 수)');
 		if (
+			!toggle &&
+			!grid &&
 			/(선택|누르|누를|변경|버튼을)\S*\s*(시|경우|하면|거나)/.test(body) &&
 			/(닫힘|열림|제공|이동|호출|동작|노출)/.test(body)
 		) {
 			add('behavior', 'code', null, '조작 → 결과 (계획에 조작 단계를 넣어 확인)');
 		}
-		if (/가능$|루프/.test(body.replace(/[.\s]+$/, '')))
+		if (!toggle && /가능$|루프/.test(body.replace(/[.\s]+$/, '')))
 			add('behavior', 'code', null, '조작 → 결과 (계획에 조작 단계를 넣어 확인)');
 
 		if (ref === undefined || !/참고/.test(t)) {

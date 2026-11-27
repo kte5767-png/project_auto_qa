@@ -2,7 +2,7 @@ export type { ClipResult, Rect, Size, Visibility } from './geometry';
 export { area, clipToViewport, intersection, iou, scaleRect } from './geometry';
 export type { BlobStore } from './storage';
 export type { CdpKeyEvent, KeyDef, KeyMap, RemoteKey } from './remote';
-export { REMOTE_KEYS, WEBOS_KEY_MAP, cdpKeyEvents, isRemoteKey, parseKeySequence } from './remote';
+export { REMOTE_KEYS, WEBOS_KEY_MAP, cdpKeyEvents, isRemoteKey, keyboardEnterEvents, parseKeySequence } from './remote';
 export type { Driver, ScreenshotOptions, ScriptRunner, StableOptions, StableResult } from './driver';
 export { DEFAULT_STABLE_OPTIONS, UnsupportedKeyError } from './driver';
 export { PAGE_SCRIPT_ECMA_VERSION, pageExpression } from './pageScript';

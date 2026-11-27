@@ -27,6 +27,8 @@
 		"spike:judge": "pnpm --filter @auto-qa/spike-p0-8-judge start",
 		"spike:e2e": "pnpm --filter @auto-qa/spike-p0-8-e2e start",
 		"spike:tc-run": "pnpm --filter @auto-qa/spike-p0-8-e2e tc",
+		"spike:tc-mutate": "pnpm --filter @auto-qa/spike-p0-8-e2e mutate",
+		"spike:tc-ai": "pnpm --filter @auto-qa/spike-p0-8-e2e ai",
 		"figma:build": "pnpm --filter @auto-qa/figma-plugin build",
 		"check": "pnpm lint && pnpm format && pnpm typecheck && pnpm test",
 		"db:up": "docker compose up -d",

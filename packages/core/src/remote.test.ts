@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { REMOTE_KEYS, WEBOS_KEY_MAP, cdpKeyEvents, isRemoteKey, parseKeySequence } from './remote';
+import { REMOTE_KEYS, WEBOS_KEY_MAP, cdpKeyEvents, isRemoteKey, keyboardEnterEvents, parseKeySequence } from './remote';
 
 describe('cdpKeyEvents', () => {
 	it('keydown/keyup에 같은 keyCode와 key를 넣는다 (webOS Back 461)', () => {
@@ -21,6 +21,15 @@ describe('cdpKeyEvents', () => {
 		if (down === null) throw new Error('DOWN 정의 없음');
 		expect(cdpKeyEvents(down)[0].windowsVirtualKeyCode).toBe(40);
 		expect(cdpKeyEvents(down)[0].key).toBe('ArrowDown');
+	});
+
+	it('키보드 확인(Enter)은 리모컨 OK와 달리 글자 "\\r"가 붙는다 (keypress가 생김)', () => {
+		const [down, up] = keyboardEnterEvents();
+		expect(down).toMatchObject({ type: 'keyDown', key: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+		expect(up).toMatchObject({ type: 'keyUp', key: 'Enter' });
+		expect(up.text).toBeUndefined();
+		const ok = WEBOS_KEY_MAP.OK;
+		expect(ok === null ? 'x' : cdpKeyEvents(ok)[0].text).toBeUndefined();
 	});
 
 	it('HOME은 시스템 키라 페이지 키 이벤트가 없다', () => {

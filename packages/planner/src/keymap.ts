@@ -35,6 +35,8 @@ export type KeyEffect =
 	| { kind: 'leave'; to: string }
 	/** 같은 목록 안의 다음(+1)·이전(-1) 항목. item은 문장에 적힌 항목 이름 */
 	| { kind: 'step'; delta: 1 | -1; item: string | null }
+	/** 같은 목록(그리드) 안 아래(+1)·위(-1) 줄 항목 ("아래 콘텐츠로 이동") */
+	| { kind: 'row'; delta: 1 | -1 }
 	/** 다른 콜아웃으로. memory: 이동한 이력이 있으면 마지막 위치로 */
 	| { kind: 'move'; to: string; position: 'first' | 'last'; item: string | null; memory: boolean }
 	/** 콜아웃이 아닌 요소(또는 이름을 콜아웃에 대응시키지 못함) */
@@ -58,8 +60,29 @@ export interface KeyMapOptions {
 	leave: { pattern: string; to: string }[];
 	nextWords: string[];
 	prevWords: string[];
+	/**
+	 * 같은 목록 안 옆·아래 항목: 키 방향과 같은 방향 낱말 + 항목 낱말 ("[►] 우측 콘텐츠로 이동", "[▼] 아래 콘텐츠로 이동").
+	 * 좌우는 이전·다음 항목, 위아래는 위·아래 줄 항목. 방향이 키와 다르면("[▼] 좌측 상단 첫 번째 콘텐츠") 쓰지 않는다
+	 */
+	directionWords: Record<'up' | 'down' | 'left' | 'right', string[]>;
+	itemWords: string[];
+	/**
+	 * 키 방향의 다른 영역: 키와 같은 방향 낱말 + 영역 낱말 ("[▲] 위 쉘프 영역 마지막 포커스로 이동").
+	 * 문장이 방향으로 대상을 가리키므로 키 방향에서 가장 가까운 콜아웃이 대상이다 (추정이 아님)
+	 */
+	areaWords: string[];
+	/**
+	 * 이름 없이 "첫 번째 콘텐츠"만 말할 때 ("[▼] 좌측 상단 첫 번째 콘텐츠 포커스"): 항목 낱말 + 이 낱말이면
+	 * 키 방향에서 가장 가까운 콜아웃의 첫 항목이다. 문장에 이름이 있으면(맞는 콜아웃이 없어도) 쓰지 않는다
+	 */
+	firstWords: string[];
 	lastWords: string[];
 	memoryWords: string[];
+	/**
+	 * 본문이 "마지막으로 포커스했던 곳"으로 가라고 할 때의 말 (예: "추천검색어의 라스트포커스로 이동").
+	 * 이력 위치(memory)로 읽고, 이름·"마지막 항목"을 찾을 때는 이 말을 뺀다
+	 */
+	lastFocusWords: string[];
 	endNoopWords: string[];
 	/** 이름 비교에서 빼는 일반 낱말 */
 	stopWords: string[];
@@ -90,8 +113,25 @@ export const DEFAULT_KEYMAP_OPTIONS: KeyMapOptions = {
 	],
 	nextWords: ['다음'],
 	prevWords: ['이전'],
+	directionWords: {
+		up: ['위쪽', '위', '상단'],
+		down: ['아래쪽', '아래', '하단'],
+		left: ['왼쪽', '좌측'],
+		right: ['오른쪽', '우측']
+	},
+	itemWords: ['콘텐츠', '항목', '아이템', '카드', '썸네일'],
+	areaWords: ['쉘프', '셸프', '영역', '리스트', '목록', '섹션'],
+	firstWords: ['첫 번째', '첫번째', '첫 '],
 	lastWords: ['마지막'],
 	memoryWords: ['이동한 이력', '이력이 있을'],
+	lastFocusWords: [
+		'라스트 포커스',
+		'라스트포커스',
+		'마지막 포커스한',
+		'마지막으로 포커스한',
+		'마지막 포커스',
+		'마지막으로 포커스'
+	],
 	endNoopWords: ['더 이상'],
 	stopWords: [
 		'영역',
@@ -170,7 +210,7 @@ function f1(a: readonly string[], b: readonly string[]): number {
 
 /** 두 이름의 낱말 일치(F1, 0~1). 조사·일반 낱말은 빼고 비교한다 */
 export function nameScore(a: string, b: string, options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS): number {
-	return f1(nameTokens(a, options), nameTokens(b, options));
+	return spacedF1(nameTokens(a, options), nameTokens(b, options));
 }
 
 /** 콜아웃 이름 + 사람이 정한 다른 이름 */
@@ -183,9 +223,38 @@ function namesOf(c: NavCallout, options: KeyMapOptions): string[] {
 	return out;
 }
 
+/**
+ * 띄어쓰기 차이 맞추기: a의 낱말 하나가 b의 이어진 낱말들을 붙인 것과 같으면 그 낱말들로 나눈다
+ * ("추천검색어" ↔ "추천 검색어"). TC·화면설계서는 같은 이름을 붙여 쓰기도 띄어 쓰기도 한다
+ */
+export function splitLikeOther(a: readonly string[], b: readonly string[]): string[] {
+	const out: string[] = [];
+	for (const t of a) {
+		let parts: string[] | null = null;
+		for (let i = 0; i < b.length && parts === null; i++) {
+			let joined = '';
+			for (let j = i; j < b.length; j++) {
+				joined += b[j];
+				if (joined.length > t.length) break;
+				if (j > i && joined === t) {
+					parts = b.slice(i, j + 1);
+					break;
+				}
+			}
+		}
+		out.push(...(parts ?? [t]));
+	}
+	return out;
+}
+
+/** 띄어쓰기를 맞춘 F1 (양쪽 모두 상대 낱말 기준으로 나눈 뒤 비교) */
+export function spacedF1(a: readonly string[], b: readonly string[]): number {
+	return f1(splitLikeOther(a, b), splitLikeOther(b, a));
+}
+
 function bestNameScore(phrase: readonly string[], c: NavCallout, options: KeyMapOptions): number {
 	let best = 0;
-	for (const n of namesOf(c, options)) best = Math.max(best, f1(phrase, nameTokens(n, options)));
+	for (const n of namesOf(c, options)) best = Math.max(best, spacedF1(phrase, nameTokens(n, options)));
 	return best;
 }
 
@@ -244,6 +313,10 @@ export function calloutsInDirection(
 	return scored.map((s) => s.c);
 }
 
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function hasAny(text: string, words: readonly string[]): boolean {
 	return words.some((w) => text.includes(w));
 }
@@ -258,8 +331,13 @@ export function parseKeyAction(
 ): KeyAction {
 	const raw = normalize(text);
 	const conditions = [...raw.matchAll(/\(([^)]*)\)/g)].map((m) => m[1] ?? '');
-	const main = normalize(raw.replace(/\([^)]*\)/g, ' '));
-	const memory = conditions.some((c) => hasAny(c, options.memoryWords));
+	const body = normalize(raw.replace(/\([^)]*\)/g, ' '));
+	const lastFocus = [...options.lastFocusWords].sort((a, b) => b.length - a.length).find((w) => body.includes(w));
+	const main =
+		lastFocus === undefined
+			? body
+			: normalize(body.replace(new RegExp(`${escapeRegExp(lastFocus)}(?:으로|로|에|을|를)?`, 'g'), ' '));
+	const memory = lastFocus !== undefined || conditions.some((c) => hasAny(c, options.memoryWords));
 	const endNoop = conditions.some((c) => hasAny(c, options.endNoopWords));
 	const base = { from: from.no, key, text: raw, endNoop, estimate: null };
 	const done = (effect: KeyEffect, reason: string): KeyAction => ({ ...base, effect, reason });
@@ -274,6 +352,28 @@ export function parseKeyAction(
 	if (first !== undefined && (options.nextWords.includes(first) || options.prevWords.includes(first))) {
 		const delta = options.nextWords.includes(first) ? 1 : -1;
 		return done({ kind: 'step', delta, item: null }, `"${first}" → 같은 목록 ${delta > 0 ? '다음' : '이전'} 항목`);
+	}
+
+	if (key === 'up' || key === 'down' || key === 'left' || key === 'right') {
+		const dir = [...options.directionWords[key]].sort((a, b) => b.length - a.length);
+		const nouns = [...options.itemWords].sort((a, b) => b.length - a.length);
+		const rel = new RegExp(`^(?:${dir.map(escapeRegExp).join('|')})\\s*(?:${nouns.map(escapeRegExp).join('|')})`);
+		const areas = [...options.areaWords].sort((a, b) => b.length - a.length);
+		const area = new RegExp(`^(?:${dir.map(escapeRegExp).join('|')})\\s*(?:${areas.map(escapeRegExp).join('|')})`);
+		const nearest = area.test(main) ? calloutsInDirection(from, key, callouts, options)[0] : undefined;
+		if (nearest !== undefined) {
+			const position: 'first' | 'last' = hasAny(main, options.lastWords) ? 'last' : 'first';
+			return done(
+				{ kind: 'move', to: nearest.no, position, item: null, memory },
+				`"${main}" = 키 방향 영역 ${nearest.no}번`
+			);
+		}
+		if (rel.test(main)) {
+			const delta = key === 'down' || key === 'right' ? 1 : -1;
+			return key === 'left' || key === 'right'
+				? done({ kind: 'step', delta, item: null }, `"${main}" → 같은 목록 ${delta > 0 ? '다음' : '이전'} 항목`)
+				: done({ kind: 'row', delta }, `"${main}" → 같은 목록 ${delta > 0 ? '아래' : '위'} 줄 항목`);
+		}
 	}
 
 	const others = callouts.filter((c) => c.no !== from.no);
@@ -323,8 +423,22 @@ export function parseKeyAction(
 		}
 	}
 
-	// 이름으로 못 정함: 콜아웃이 아닌 요소로 남기고, 키 방향 후보는 따로 붙인다
+	// 이름 없이 "첫 번째 콘텐츠": 키 방향에서 가장 가까운 콜아웃의 첫 항목
 	const nearest = calloutsInDirection(from, key, callouts, options)[0];
+	if (
+		directional &&
+		nearest !== undefined &&
+		tokens.length === 0 &&
+		quoted.length === 0 &&
+		hasAny(main, options.itemWords) &&
+		options.firstWords.some((w) => `${main} `.includes(w))
+	) {
+		return done(
+			{ kind: 'move', to: nearest.no, position: 'first', item: null, memory },
+			`"${main}" = 키 방향 콜아웃 ${nearest.no}번의 첫 항목`
+		);
+	}
+	// 이름으로 못 정함: 콜아웃이 아닌 요소로 남기고, 키 방향 후보는 따로 붙인다
 	const estimate = nearest === undefined ? null : { to: nearest.no, reason: `키 방향에서 가장 가까운 콜아웃` };
 	const name = quoted[0] ?? phrase;
 	if (name === '') return { ...done({ kind: 'unknown' }, '대상 이름 없음'), estimate };
@@ -378,6 +492,8 @@ export function describeEffect(effect: KeyEffect): string {
 			return `leave:${effect.to}`;
 		case 'step':
 			return effect.delta > 0 ? 'next' : 'prev';
+		case 'row':
+			return effect.delta > 0 ? 'row-next' : 'row-prev';
 		case 'move':
 			return `move:${effect.to}:${effect.item === null ? effect.position : `item=${effect.item.toLowerCase()}`}${effect.memory ? '+memory' : ''}`;
 		case 'element':

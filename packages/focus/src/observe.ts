@@ -25,6 +25,11 @@ export interface ObservedFocus {
 	text: string;
 	/** [x, y, width, height] */
 	rect: [number, number, number, number];
+	/**
+	 * 켜짐·꺼짐 같은 상태 표시: 요소와 안쪽의 aria-checked·aria-pressed·aria-selected, 체크박스 checked, 클래스
+	 * (움직임용 클래스 제외). 토글 판정에서 OK 전후를 비교한다
+	 */
+	state: string;
 }
 
 export interface ObservedTarget {
@@ -46,6 +51,8 @@ export interface ObservedTarget {
 	textOverflow: { overflowing: number; ellipsis: number };
 	/** 처음 보이는 요소의 [x, y, width, height]. 보이는 것이 없으면 null */
 	rect: [number, number, number, number] | null;
+	/** 보이는 항목의 [x, y, width, height] (maxItems개까지) — 그리드 배치 판정용 */
+	itemRects: [number, number, number, number][];
 }
 
 export interface ObserveOptions {
@@ -55,14 +62,26 @@ export interface ObserveOptions {
 	maxText: number;
 	/** 요소 하나에서 돌려줄 최대 항목 글자 수 */
 	maxItems: number;
+	/** 상태 표시에서 뺄 클래스 (정규식 원문, 대소문자 무시) — 시간이 지나면 저절로 바뀌는 것 */
+	stateIgnoreClass: string;
+	/** 상태 표시에 넣을 최대 조각 수 */
+	maxStateParts: number;
 }
 
-export const DEFAULT_OBSERVE_OPTIONS: ObserveOptions = { focusSelector: null, maxText: 120, maxItems: 30 };
+export const DEFAULT_OBSERVE_OPTIONS: ObserveOptions = {
+	focusSelector: null,
+	maxText: 120,
+	maxItems: 30,
+	stateIgnoreClass: 'marquee|animat|transition',
+	maxStateParts: 40
+};
 
 export interface Observation {
 	/** 포커스 요소. 없으면(body에 머묾) null */
 	focus: ObservedFocus | null;
 	targets: ObservedTarget[];
+	/** 화면 크기 [width, height] (CSS 픽셀) */
+	viewport: [number, number];
 	/** 선택자 문법 오류 등 */
 	errors: string[];
 }
@@ -125,6 +144,30 @@ function observeInPage(input: ObserveInput): Observation {
 		focusEl = a === null || a === document.body || a === document.documentElement ? null : a;
 	}
 
+	const rectOf = (el: Element): [number, number, number, number] => {
+		const r = el.getBoundingClientRect();
+		return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+	};
+	const ignoreClass = new RegExp(opts.stateIgnoreClass, 'i');
+	const stateOf = (el: Element): string => {
+		const parts: string[] = [];
+		const all = [el].concat(Array.prototype.slice.call(el.querySelectorAll('*')) as Element[]);
+		const attrs = ['aria-checked', 'aria-pressed', 'aria-selected'];
+		for (let i = 0; i < all.length && parts.length < opts.maxStateParts; i++) {
+			const e = all[i] as Element;
+			for (let j = 0; j < attrs.length; j++) {
+				const v = e.getAttribute(attrs[j] as string);
+				if (v !== null) parts.push(i + ':' + attrs[j] + '=' + v);
+			}
+			if (e instanceof HTMLInputElement && (e.type === 'checkbox' || e.type === 'radio')) {
+				parts.push(i + ':checked=' + String(e.checked));
+			}
+			const cls = (Array.prototype.slice.call(e.classList) as string[]).filter((c) => !ignoreClass.test(c));
+			if (cls.length > 0) parts.push(i + ':.' + cls.join('.'));
+		}
+		return parts.slice(0, opts.maxStateParts).join(' ');
+	};
+
 	let focus: ObservedFocus | null = null;
 	if (focusEl !== null) {
 		const r = focusEl.getBoundingClientRect();
@@ -134,7 +177,8 @@ function observeInPage(input: ObserveInput): Observation {
 			spotlightId: holder === null ? null : holder.getAttribute('data-spotlight-id'),
 			classes: Array.prototype.slice.call(focusEl.classList) as string[],
 			text: textOf(focusEl),
-			rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]
+			rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+			state: stateOf(focusEl)
 		};
 	}
 	const contains = (el: Element): boolean => focusEl !== null && (el === focusEl || el.contains(focusEl));
@@ -195,13 +239,14 @@ function observeInPage(input: ObserveInput): Observation {
 			texts: shown.reduce((all: string[], m) => all.concat(textsOf(m)), []),
 			itemCount: items.length,
 			itemTexts: items.slice(0, opts.maxItems).map(textOf),
+			itemRects: items.slice(0, opts.maxItems).map(rectOf),
 			hasFocus: matches.some(contains),
 			focusItem,
 			textOverflow: { overflowing, ellipsis }
 		};
 	});
 
-	return { focus, targets, errors };
+	return { focus, targets, viewport: [window.innerWidth, window.innerHeight], errors };
 }
 
 export function observeScript(targets: readonly ObserveTarget[], options: Partial<ObserveOptions> = {}): string {

@@ -20,6 +20,7 @@ import {
 	matchByName,
 	navScreenFromSpec,
 	overrideKeyTexts,
+	resolveAbsentCondition,
 	resolveTextValue
 } from '@auto-qa/planner';
 import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
@@ -390,6 +391,11 @@ export interface TcKeyTexts {
 	screen: string;
 	no: string;
 	texts: Partial<Record<SpecKey, string>>;
+	/**
+	 * TC "X가 없을 경우 Y"의 X가 누르기 전 화면에 보이는가 (모르면 null → 조건을 고르지 않음).
+	 * 없으면 판정에서 조건을 쓰지 않는다
+	 */
+	present?: (name: string, obs: Observation) => boolean | null;
 }
 
 /**
@@ -424,9 +430,17 @@ export function checkSpecMove(
 	// 판정 기준은 TC: 확인하는 콜아웃에서 누른 키면 TC 문장으로 다시 해석해 바꿔 끼운다. 화면설계서와 다르면 설명에 남긴다
 	let basisName = '화면설계서';
 	let specNote = '';
+	let conditionNote = '';
 	const nav = ref === null ? undefined : spec.navs?.get(ref.screen);
 	if (ref !== null && tc !== null && tc.screen === ref.screen && tc.no === ref.no && nav !== undefined) {
-		const o = overrideKeyTexts(actions ?? [], nav, ref.no, tc.texts, spec.options);
+		// "X가 없을 경우 Y": 누르기 전 화면에 X가 있는지로 문장 하나를 고른다
+		const texts: Partial<Record<SpecKey, string>> = {};
+		for (const [k, t] of Object.entries(tc.texts) as [SpecKey, string][]) {
+			const r = resolveAbsentCondition(t, (name) => tc.present?.(name, before) ?? null);
+			texts[k] = r.text;
+			if (k === specKey && r.note !== null) conditionNote = ` (${r.note})`;
+		}
+		const o = overrideKeyTexts(actions ?? [], nav, ref.no, texts, spec.options);
 		const mine = o.tc[specKey];
 		if (mine !== undefined) {
 			actions = o.actions;
@@ -441,6 +455,7 @@ export function checkSpecMove(
 				specNote = ` — 화면설계서는 "${old.text}"`;
 		}
 	}
+	specNote = `${conditionNote}${specNote}`;
 	if (ref === null || actions === undefined) {
 		return result(label, 'key', null, `화면설계서에 ${ref?.screen ?? '?'} 화면이 없음`);
 	}
@@ -461,9 +476,45 @@ export function checkSpecMove(
 		if (want === undefined) return result(clause, 'key', null, `${ref.screen} ${no}번 콜아웃에 대응된 요소가 없음`);
 	} else {
 		const name = exp.target.kind === 'element' ? exp.target.name : exp.target.to;
-		const m = matchByName(name, Object.entries(nameScope), ([n, e]) => [n, ...(e.names ?? [])], spec.options);
-		if (m === null) return result(clause, 'key', null, `"${name}"에 대응된 요소가 없음`);
-		want = m.match;
+		// 이름으로 가리킨 이동 대상은 누르기 전 요소 자신이 아니다 (그 자리에 남는 것은 "동작 없음").
+		// 4.4 팝업 "Search Option"의 "[▲] "Option" 버튼"은 팝업을 연 4.2 ⑤ "Search Option 메뉴"다 (Search!34)
+		const scope = Object.entries(nameScope).filter(([n]) => n !== fromName);
+		const m = matchByName(name, scope, ([n, e]) => [n, ...(e.names ?? [])], spec.options);
+		if (m !== null) want = m.match;
+		else {
+			// 요소 이름이 아니면 화면에 보이는 목록 항목 글자에서 찾는다 ("[►] "Driving" 카테고리에 포커스" → 카테고리 목록의 "Driving 1")
+			const hit = itemByText(name, before, Object.entries(nameScope));
+			if (hit === null) return result(clause, 'key', null, `"${name}"에 대응된 요소가 없음`);
+			const [itemOwner, found, itemText] = hit;
+			const got = target(after, itemOwner[0]);
+			// 같은 목록의 항목 이름은 TC를 쓸 때 데이터의 예시다. 같은 목록이면 키 방향의 옆 항목으로 보고 이름 차이는 설명에 남긴다
+			const sameList = itemOwner[0] === fromName && prev !== undefined && prev.focusItem >= 0;
+			const delta = specKey === 'right' || specKey === 'down' ? 1 : -1;
+			const itemIndex = sameList ? (prev?.focusItem ?? 0) + delta : found;
+			const gotText = got === undefined ? '' : (got.itemTexts[got.focusItem] ?? '');
+			const nameNote = !sameList
+				? `항목 "${itemText}"`
+				: itemIndex === found
+					? `옆 항목 "${itemText}"`
+					: `옆 항목 — TC 예시 이름 "${name}"은 이 데이터에서 ${found + 1}번째 "${itemText}", 실제 옆 항목 "${gotText}"`;
+			const ok = got?.hasFocus === true && got.focusItem === itemIndex;
+			const wantText = `${itemOwner[0]}[${itemIndex}]${sameList ? '' : ` "${itemText}"`}`;
+			const actual = focusText(after);
+			return ok
+				? result(
+						clause,
+						'key',
+						'pass',
+						`${KEY_LABEL[key]} → ${actual} (${basisName}대로, ${nameNote}${specNote})`,
+						itemOwner[0]
+					)
+				: result(
+						clause,
+						'key',
+						'fail',
+						`${KEY_LABEL[key]} 후 포커스가 ${basisName}와 다름: 기대 ${wantText} / 실제 ${actual} (${nameNote})${specNote}`
+					);
+		}
 	}
 	const [wantName] = want;
 	const got = target(after, wantName);
@@ -476,8 +527,14 @@ export function checkSpecMove(
 					remembered: remembered.get(wantName) ?? null,
 					endNoop: exp.endNoop
 				});
-	const wantText = `${wantName}${index === null ? '' : `[${index}]`}`;
-	const ok = got?.hasFocus === true && (index === null || got.focusItem === index);
+	// 그리드의 아래·위 줄 항목: 몇 번째인지는 줄 폭을 알아야 하므로, 같은 목록 안에서 포커스가 그 방향 줄로 갔는지 본다
+	const row = exp.item === 'below' || exp.item === 'above' ? exp.item : null;
+	const fromY = before.focus?.rect[1] ?? null;
+	const toY = after.focus?.rect[1] ?? null;
+	const rowOk =
+		row === null || (fromY !== null && toY !== null && (row === 'below' ? toY > fromY + 1 : toY < fromY - 1));
+	const wantText = `${wantName}${index === null ? (row === null ? '' : ` ${row === 'below' ? '아래' : '위'} 줄`) : `[${index}]`}`;
+	const ok = got?.hasFocus === true && (index === null || got.focusItem === index) && rowOk;
 	const actual = focusText(after);
 	if (exp.estimated) {
 		return result(
@@ -495,6 +552,35 @@ export function checkSpecMove(
 				'fail',
 				`${KEY_LABEL[key]} 후 포커스가 ${basisName}와 다름: 기대 ${wantText} / 실제 ${actual}${specNote}`
 			);
+}
+
+/**
+ * 이름이 화면에 보이는 목록 항목 글자 하나에만 들어 있으면 그 항목 (요소, 순번, 글자). 낱말이 모두 들어 있어야 하고
+ * (대소문자·띄어쓰기 무시), 여러 항목에 맞으면 null (추측하지 않음)
+ */
+export function itemByText(
+	name: string,
+	obs: Observation,
+	scope: readonly [string, ElementDef][]
+): [[string, ElementDef], number, string] | null {
+	const words = name
+		.toLowerCase()
+		.split(/[^0-9a-z가-힣]+/)
+		.filter((w) => w !== '');
+	if (words.length === 0) return null;
+	const hits: [[string, ElementDef], number, string][] = [];
+	for (const entry of scope) {
+		const t = target(obs, entry[0]);
+		if (t === undefined || t.visible === 0 || t.itemCount <= 1) continue;
+		t.itemTexts.forEach((text, i) => {
+			const have = text
+				.toLowerCase()
+				.split(/[^0-9a-z가-힣]+/)
+				.filter((w) => w !== '');
+			if (words.every((w) => have.includes(w))) hits.push([entry, i, text]);
+		});
+	}
+	return hits.length === 1 ? (hits[0] ?? null) : null;
 }
 
 // ── 보기 옵션 ───────────────────────────────────────────
@@ -524,4 +610,13 @@ export async function viewOptions(
 	const pauseMs = slow === undefined ? (headed ? 800 : 0) : Number(slow);
 	if (!(pauseMs >= 0)) throw new Error(`--slow는 0 이상의 ms: ${String(slow)}`);
 	return { windowScale, pauseMs };
+}
+
+/** "X 미노출"의 X: 없어야 하는 말과 괄호 보충을 뺀 나머지 */
+export function absenceSubject(text: string): string {
+	return text
+		.replace(/\([^()]*\)/g, ' ')
+		.replace(/(?:미노출|미제공|노출(?:되지|하지)\s*않\S*|제공(?:되지|하지)\s*않\S*)[\s\S]*$/, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 }

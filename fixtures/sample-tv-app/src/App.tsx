@@ -33,6 +33,7 @@ export function App({ config, engine }: AppProps) {
 	const selectHandlers = useRef(new Map<string, () => void>());
 	const backHandler = useRef<(() => boolean) | null>(null);
 	const [recentSearches, setRecentSearches] = useState<string[]>([]);
+	const [saveRecent, setSaveRecent] = useState(true);
 	const screen: Screen = stack[stack.length - 1] ?? { name: 'home' };
 
 	// 구독을 먼저 걸어야 첫 포커스 이동도 상태에 반영된다 (레이아웃 이펙트는 선언 순서대로 실행)
@@ -118,13 +119,28 @@ export function App({ config, engine }: AppProps) {
 		backHandler.current = handler;
 	}, []);
 
-	const addRecentSearch = useCallback((query: string) => {
-		setRecentSearches((list) => [query, ...list.filter((q) => q !== query)].slice(0, MAX_RECENT_SEARCHES));
-	}, []);
+	const addRecentSearch = useCallback(
+		(query: string) => {
+			if (!saveRecent) return;
+			setRecentSearches((list) => [query, ...list.filter((q) => q !== query)].slice(0, MAX_RECENT_SEARCHES));
+		},
+		[saveRecent]
+	);
 
 	const contextValue = useMemo<AppContextValue>(
-		() => ({ config, layout, focusedId, registerSelect, focus, setBackHandler, recentSearches, addRecentSearch }),
-		[config, layout, focusedId, registerSelect, focus, setBackHandler, recentSearches, addRecentSearch]
+		() => ({
+			config,
+			layout,
+			focusedId,
+			registerSelect,
+			focus,
+			setBackHandler,
+			recentSearches,
+			addRecentSearch,
+			saveRecent,
+			setSaveRecent
+		}),
+		[config, layout, focusedId, registerSelect, focus, setBackHandler, recentSearches, addRecentSearch, saveRecent]
 	);
 
 	const openDetail = useCallback(

@@ -1,5 +1,5 @@
 import type { SpecKey } from '@auto-qa/spec';
-import { DEFAULT_KEYMAP_OPTIONS, describeEffect, nameScore, nameTokens } from './keymap';
+import { DEFAULT_KEYMAP_OPTIONS, describeEffect, nameScore, nameTokens, splitLikeOther } from './keymap';
 import type { KeyAction, KeyMapOptions } from './keymap';
 
 /**
@@ -20,9 +20,10 @@ export type FocusTarget =
 /**
  * 목록 안 위치.
  * memory = 이동한 이력이 있으면 마지막으로 있던 항목, 없으면 첫 항목.
- * same = 같은 항목 그대로. null = 화면설계서가 정하지 않음
+ * same = 같은 항목 그대로. below·above = 같은 목록(그리드)의 아래·위 줄 항목 (몇 번째인지는 줄 폭을 알아야 해서 정하지 않음).
+ * null = 화면설계서가 정하지 않음
  */
-export type FocusItem = 'first' | 'last' | 'next' | 'prev' | 'memory' | 'same' | null;
+export type FocusItem = 'first' | 'last' | 'next' | 'prev' | 'below' | 'above' | 'memory' | 'same' | null;
 
 export interface ExpectedFocus {
 	ok: true;
@@ -104,6 +105,8 @@ export function expectAfterKey(
 			return { ...base, target: { kind: 'leave', to: e.to }, item: null };
 		case 'step':
 			return { ...base, target: { kind: 'same' }, item: e.delta > 0 ? 'next' : 'prev', itemName: e.item };
+		case 'row':
+			return { ...base, target: { kind: 'same' }, item: e.delta > 0 ? 'below' : 'above' };
 		case 'move':
 			return {
 				...base,
@@ -144,8 +147,11 @@ function covered(p: readonly string[], q: readonly string[]): boolean {
  * "GNB" ↔ "GNB 검색", "추천 검색어" ↔ "4.2 ② 추천 검색어"는 한쪽이 다른 쪽에 들어 있어 점수를 준다.
  */
 export function containedNameScore(a: string, b: string, options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS): number {
-	const x = nameTokens(a, options);
-	const y = nameTokens(b, options);
+	const x0 = nameTokens(a, options);
+	const y0 = nameTokens(b, options);
+	// 띄어쓰기 차이("추천검색어" ↔ "추천 검색어")는 같은 이름으로 본다
+	const x = splitLikeOther(x0, y0);
+	const y = splitLikeOther(y0, x0);
 	if (!covered(x, y) && !covered(y, x)) return 0;
 	return nameScore(a, b, options);
 }
@@ -193,6 +199,8 @@ export function expectedItemIndex(
 			return context.previous - 1 >= 0 ? context.previous - 1 : atEnd();
 		case 'memory':
 			return context.remembered ?? 0;
+		case 'below':
+		case 'above':
 		case null:
 			return null;
 	}

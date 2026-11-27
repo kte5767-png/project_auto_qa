@@ -16,6 +16,9 @@ export interface AppContextValue {
 	/** 최근 검색어 (최신순, 화면설계서 4.3: 최대 5개). 검색 화면을 나가도 앱이 켜져 있는 동안 남는다 */
 	recentSearches: string[];
 	addRecentSearch: (query: string) => void;
+	/** 최근 검색어 저장 (화면설계서 4.4 Search Option: 기본값 On). Off면 검색해도 최근 검색어에 남기지 않는다 */
+	saveRecent: boolean;
+	setSaveRecent: (on: boolean) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

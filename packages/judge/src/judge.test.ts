@@ -54,9 +54,68 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(find('플레이스 홀더')?.checks[0]?.value).toBe('Search your place.');
 		expect(kinds(find('Keyword'))).toEqual(['focus:code', 'presence:code']);
 		expect(kinds(find('정책을 따름'))).toEqual(['reference:none']);
-		expect(kinds(find('255자'))).toEqual(['input:none']);
+		expect(kinds(find('255자'))).toEqual(['input:code']);
+		expect(find('255자')?.checks[0]?.value).toBe('max:255');
 		expect(kinds(find('자연스럽게'))).toEqual(['descriptive:ai']);
 		expect(kinds(find('팝업 닫힘'))).toEqual(['behavior:code']);
+	});
+
+	it('Marquee: 기다릴 초를 값으로, "적용되지 않음"은 움직이지 않아야 함', () => {
+		const [after, plain, still, none] = splitClauses(
+			[
+				'- 포커스 시 2초 뒤 Marquee 제공',
+				'- 말줄임된 키워드 포커스시 marquee 처리',
+				'- Marquee 적용되지 않음',
+				'- Marquee 제공하지 않음'
+			].join('\n')
+		);
+		expect(after?.checks.find((c) => c.kind === 'motion')?.value).toBe(2);
+		expect(plain?.checks.find((c) => c.kind === 'motion')?.value).toBeNull();
+		expect(kinds(still)).toEqual(['motion:code']);
+		expect(still?.checks[0]?.value).toBe('still');
+		expect(kinds(none)).toEqual(['motion:code']);
+	});
+
+	it('항목 종류에 따른 조건("이미지 콘텐츠일 경우 …")은 문장 전체를 확인하지 않는다', () => {
+		const [image, plain] = splitClauses(
+			['- 이미지 콘텐츠일 경우 이미지 상세 페이지로 진입', '- 상세 페이지로 진입'].join('\n')
+		);
+		expect(kinds(image)).toEqual(['data:none']);
+		expect(kinds(plain)).toEqual(['transition:code']);
+	});
+
+	it('글자 입력 조건 중 입력란 모양으로 볼 수 있는 것은 코드로, 나머지는 확인 불가', () => {
+		const clauses = splitClauses(
+			[
+				'- 최대 입력 가능 글자 수: 255자(공백 포함)',
+				'- 입력값의 선행 및 후행 공백은 자동 제거',
+				'예: 공백 입력 후 입력값 입력 / 입력값 입력 후 공백 입력',
+				'- 입력값이 영역을 벗어날 경우 오른쪽 끝 말줄임 처리',
+				'- 사용자가 검색창에 입력할 때 최근 입력된 글자가 오른쪽에 유지',
+				'- 입력값 검색 후에는 입력값의 처음부터 표시(검색어 시작 부분)',
+				'- 입력값에 따라 자동 완성 키워드 제공'
+			].join('\n')
+		);
+		expect(clauses.map((c) => c.checks.map((k) => `${k.kind}:${k.method}:${String(k.value)}`))).toEqual([
+			['input:code:max:255'],
+			['input:code:trim'],
+			['input:code:ellipsis'],
+			['input:code:tail'],
+			['input:code:head'],
+			['input:none:입력값']
+		]);
+	});
+
+	it('리모컨 전용 버튼·포인터 조작은 따로 구분한다 (그 조작의 결과까지)', () => {
+		const [more, pointer] = splitClauses(
+			[
+				'- 리모컨 More Action 버튼 선택 시에도 동일하게 동작',
+				'- MRCU 포인터로 팝업 외 영역 선택 시 팝업 닫힘'
+			].join('\n')
+		);
+		expect(kinds(more)).toEqual(['remote:code']);
+		expect(more?.checks[0]?.value).toBe('More Action');
+		expect(kinds(pointer)).toEqual(['remote:code']);
 	});
 
 	it('"페이지 진입 시"는 화면 전환이 아니라 진입했을 때의 조건이다', () => {
@@ -77,8 +136,23 @@ describe('기대 결과를 조건으로 나누기', () => {
 		expect(kinds(menu)).toEqual(['presence:code']);
 		expect(kinds(search)).toEqual(['data:none']);
 		expect(kinds(sorted)).toEqual(['data:none']);
-		expect(kinds(typed)).toEqual(['input:none']);
+		expect(kinds(typed)).toEqual(['input:code']);
 		expect(kinds(idx)).toEqual(['data:none']);
+	});
+
+	it('켜고 끄기(On/Off 가능)와 그리드 배치는 따로 구분한다 (조작 → 결과로 두지 않음)', () => {
+		const [toggle, grid, plain] = splitClauses(
+			[
+				'2) 선택 시',
+				'- 저장 On/Off 가능',
+				'- 카테고리가 선택된 경우 그리드(타일) 형태로 리스트 제공',
+				'- 선택 시 팝업 닫힘'
+			].join('\n')
+		);
+		expect(kinds(toggle)).toEqual(['toggle:code']);
+		expect(kinds(grid)).toEqual(['layout:code']);
+		expect(grid?.checks[0]?.value).toBe('grid');
+		expect(kinds(plain)).toEqual(['behavior:code']);
 	});
 });
 

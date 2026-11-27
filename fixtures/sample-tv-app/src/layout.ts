@@ -75,6 +75,14 @@ export interface Layout {
 		fieldTop: number;
 		fieldWidth: number;
 		fieldHeight: number;
+		/** 칸을 넘치는 카드 제목: 포커스 2초 뒤 흐르는 글자(Marquee). D13은 끔 */
+		cardMarquee: boolean;
+		/** 넘치는 입력값의 끝 처리 (text-overflow). D14는 clip(말줄임 없음) */
+		inputOverflow: 'ellipsis' | 'clip';
+		/** 검색 결과 그리드 한 줄의 칸 수 (화면설계서 4.5: 그리드). 0이면 한 줄 가로 목록 (D15) */
+		resultColumns: number;
+		/** 최근 검색어 저장 On/Off 버튼이 OK로 바뀌는가 (D16은 안 바뀜) */
+		saveToggle: boolean;
 	};
 }
 
@@ -145,7 +153,11 @@ export const BASE_LAYOUT: Layout = {
 		fieldLeft: 483,
 		fieldTop: 42,
 		fieldWidth: 953,
-		fieldHeight: 72
+		fieldHeight: 72,
+		cardMarquee: true,
+		inputOverflow: 'ellipsis',
+		resultColumns: 4,
+		saveToggle: true
 	}
 };
 
@@ -162,6 +174,10 @@ export function getLayout(defects: ReadonlySet<string>): Layout {
 		layout.promo.descriptionMaxLines = 1;
 	}
 	if (defects.has('D12')) layout.search.placeholder = 'Search destination or interest';
+	if (defects.has('D13')) layout.search.cardMarquee = false;
+	if (defects.has('D14')) layout.search.inputOverflow = 'clip';
+	if (defects.has('D15')) layout.search.resultColumns = 0;
+	if (defects.has('D16')) layout.search.saveToggle = false;
 	return layout;
 }
 

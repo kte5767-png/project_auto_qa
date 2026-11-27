@@ -22,6 +22,8 @@ export interface CheckResult {
 	explanation: string;
 	oracle: 'code' | 'ai' | 'none';
 	confidence: number | null;
+	/** 코드가 잰 값 (예: 보인 항목 개수). 틀린 TC를 만들 때 쓴다 */
+	observed?: number;
 }
 
 export interface StepVerdict {

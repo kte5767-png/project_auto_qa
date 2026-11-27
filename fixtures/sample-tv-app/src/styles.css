@@ -315,6 +315,33 @@ body {
 	color: #000;
 }
 
+.search-save {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	box-sizing: border-box;
+	padding: 0 24px;
+	border-radius: 36px;
+	background: #2b2b2b;
+	font-size: 26px;
+}
+
+.search-save.focused,
+.search-save:focus {
+	background: #fff;
+	color: #000;
+}
+
+.search-switch {
+	min-width: 64px;
+	text-align: right;
+	opacity: 0.6;
+}
+
+.search-switch.on {
+	opacity: 1;
+}
+
 .search-field {
 	display: flex;
 	align-items: center;
@@ -357,6 +384,8 @@ body {
 	color: #fff;
 	font-size: 26px;
 	font-family: inherit;
+	/* 입력값이 칸을 넘치면 오른쪽 끝 말줄임 (화면설계서 4.8). 값은 레이아웃에서(D14는 clip) */
+	text-overflow: ellipsis;
 }
 
 .search-field input::placeholder {
@@ -403,6 +432,27 @@ body {
 .search-card-title {
 	position: absolute;
 	left: 16px;
+	right: 16px;
 	bottom: 12px;
 	font-size: 22px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* 넘치는 제목: 카드에 포커스가 2초 머물면 흐른다 (Marquee). 말줄임은 흐르는 동안만 끈다 */
+.search-card.focused .search-card-title.marquee,
+.search-card:focus .search-card-title.marquee {
+	animation: card-marquee 8s linear 2s infinite;
+}
+
+@keyframes card-marquee {
+	0% {
+		text-indent: 0;
+		text-overflow: clip;
+	}
+	100% {
+		text-indent: -480px;
+		text-overflow: clip;
+	}
 }
