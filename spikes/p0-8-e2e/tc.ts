@@ -253,11 +253,12 @@ async function checkMotion(
 	if (miss !== null) return res(clause, check, 'needs-review', miss.reason);
 	ctx.live.phase('Marquee 움직임 확인 중');
 	const sample = (): Promise<MotionSample> => sampleMotion(runner.session.driver, runner.session.focusSelector);
-	const next = listNextKey(ctx.keyMaps?.get(screen) ?? [], no);
+	// 목록의 다음 항목 키를 모르면 오른쪽 (TV 목록·그리드는 가로가 먼저). 목록을 벗어나면 멈춘다
+	const next = listNextKey(ctx.keyMaps?.get(screen) ?? [], no) ?? 'RIGHT';
 	let first = await sample();
 	let started = Date.now();
 	const budget = Math.min(ctx.timing.motionMaxItems, Math.max(0, (seen?.itemCount ?? 1) - 1));
-	for (let i = 0; first.overflowing === 0 && next !== null && i < budget; i++) {
+	for (let i = 0; first.overflowing === 0 && i < budget; i++) {
 		const r = await runner.session.press(next, false);
 		record(trail, { key: next, focus: focusText(r.obs), stable: r.stable }, '    Marquee ');
 		if (target(r.obs, element)?.hasFocus !== true) break;

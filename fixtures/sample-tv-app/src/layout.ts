@@ -75,6 +75,8 @@ export interface Layout {
 		fieldTop: number;
 		fieldWidth: number;
 		fieldHeight: number;
+		/** 칸을 넘치는 카드 제목: 포커스 2초 뒤 흐르는 글자(Marquee). D13은 끔 */
+		cardMarquee: boolean;
 	};
 }
 
@@ -145,7 +147,8 @@ export const BASE_LAYOUT: Layout = {
 		fieldLeft: 483,
 		fieldTop: 42,
 		fieldWidth: 953,
-		fieldHeight: 72
+		fieldHeight: 72,
+		cardMarquee: true
 	}
 };
 
@@ -162,6 +165,7 @@ export function getLayout(defects: ReadonlySet<string>): Layout {
 		layout.promo.descriptionMaxLines = 1;
 	}
 	if (defects.has('D12')) layout.search.placeholder = 'Search destination or interest';
+	if (defects.has('D13')) layout.search.cardMarquee = false;
 	return layout;
 }
 

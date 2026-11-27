@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Focusable, useApp } from '../AppContext';
 import { SEARCH_CARDS, SEARCH_KEYWORDS, gradientOf, searchCards } from '../data';
@@ -21,6 +21,24 @@ const ESCAPE_KEY_CODE = 27;
  * (TV에서는 VKB가 열림), 글자는 플랫폼 키보드나 입력 이벤트로 들어온다. Enter = 검색, Back = 편집 끝.
  * 검색하면 결과(4.5) 또는 결과 없음 + 추천 키워드(4.6)를 보여 준다. 앞뒤 공백은 지운다(4.8).
  */
+/**
+ * 카드 제목. 칸을 넘치면 말줄임하고, 카드에 포커스가 2초 머물면 흐르는 글자(Marquee)로 보여 준다 (화면설계서 4.2 ②·③ 형식).
+ * 넘치는지는 그린 뒤 재서 정한다. marquee=false(D13)이면 말줄임만 한다
+ */
+function CardTitle({ text, marquee, testId }: { text: string; marquee: boolean; testId: string }) {
+	const ref = useRef<HTMLSpanElement>(null);
+	const [overflowing, setOverflowing] = useState(false);
+	useLayoutEffect(() => {
+		const el = ref.current;
+		if (el !== null) setOverflowing(el.scrollWidth > el.clientWidth + 1);
+	}, [text]);
+	return (
+		<span ref={ref} className={`search-card-title${overflowing && marquee ? ' marquee' : ''}`} data-testid={testId}>
+			{text}
+		</span>
+	);
+}
+
 export function SearchScreen({ onBack }: SearchScreenProps) {
 	const { config, layout, focus, setBackHandler, recentSearches, addRecentSearch } = useApp();
 	// 최근 검색어가 있으면 그 줄이 맨 위에 생기고 아래 섹션이 내려간다 (화면설계서 4.3)
@@ -183,7 +201,7 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 								background: gradientOf(card.hue)
 							}}
 						>
-							<span className="search-card-title">{card.title}</span>
+							<CardTitle text={card.title} marquee={search.cardMarquee} testId={`${card.id}-title`} />
 						</Focusable>
 					))}
 				</>
@@ -208,7 +226,11 @@ export function SearchScreen({ onBack }: SearchScreenProps) {
 								background: gradientOf(card.hue)
 							}}
 						>
-							<span className="search-card-title">{card.title}</span>
+							<CardTitle
+								text={card.title}
+								marquee={search.cardMarquee}
+								testId={`search-result-${i + 1}-title`}
+							/>
 						</Focusable>
 					))}
 				</>

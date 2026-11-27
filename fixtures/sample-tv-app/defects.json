@@ -126,6 +126,18 @@
 			"expected": "Search your destination or interest.",
 			"actual": "Search destination or interest",
 			"reproKeys": ["LEFT", "OK"]
+		},
+		{
+			"id": "D13",
+			"category": "spec",
+			"screen": "search",
+			"target": "search-card-4-title",
+			"summary": "Travel Now 카드 제목이 칸을 넘치는데 포커스 2초 뒤 흐르지 않음 (Marquee 없음)",
+			"expected": "넘치는 제목은 말줄임, 포커스 2초 뒤 Marquee",
+			"actual": "말줄임만, 움직이지 않음",
+			"reproKeys": ["LEFT", "OK", "DOWN", "DOWN", "RIGHT"],
+			"baselineFocus": "search-card-4",
+			"waitMs": 3000
 		}
 	]
 }

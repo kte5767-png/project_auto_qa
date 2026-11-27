@@ -403,6 +403,27 @@ body {
 .search-card-title {
 	position: absolute;
 	left: 16px;
+	right: 16px;
 	bottom: 12px;
 	font-size: 22px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* 넘치는 제목: 카드에 포커스가 2초 머물면 흐른다 (Marquee). 말줄임은 흐르는 동안만 끈다 */
+.search-card.focused .search-card-title.marquee,
+.search-card:focus .search-card-title.marquee {
+	animation: card-marquee 8s linear 2s infinite;
+}
+
+@keyframes card-marquee {
+	0% {
+		text-indent: 0;
+		text-overflow: clip;
+	}
+	100% {
+		text-indent: -480px;
+		text-overflow: clip;
+	}
 }
