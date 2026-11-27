@@ -118,6 +118,7 @@ interface StepRun {
 }
 
 const RESULT_FORMAT = 'auto-qa/tc-run-result';
+const PROGRESS_FORMAT = 'auto-qa/tc-run-progress';
 
 // ── 판정 조각 ───────────────────────────────────────────
 
@@ -1254,10 +1255,35 @@ async function main(): Promise<void> {
 	};
 	const steps: StepRun[] = [];
 	const runner = new Runner(ctx);
+	// 사용자 UI(apps/web)가 실행 중 상황을 읽는 파일: 단계가 끝날 때마다 다시 쓴다
+	const startedAt = new Date().toISOString();
+	const planned = selected.map(([c, s]) => ({
+		key: `${c.sheet}!${s.row}`,
+		screen: c.specRef?.screenId ?? '',
+		callout: s.targetRef?.callout ?? null,
+		label: s.targetRef?.label ?? c.title ?? ''
+	}));
+	const progress = async (current: string | null, finished: boolean): Promise<void> => {
+		const body = {
+			format: PROGRESS_FORMAT,
+			version: 1,
+			tc: basename(tcPath),
+			tcPath,
+			url: ctx.url,
+			startedAt,
+			updatedAt: new Date().toISOString(),
+			finished,
+			current,
+			planned,
+			steps
+		};
+		await writeFile(join(out, 'progress.json'), `${JSON.stringify(body)}\n`);
+	};
 	try {
 		for (const [c, s] of selected) {
 			const label = `${c.sheet}!${s.row} ${c.specRef?.screenId ?? ''} ${s.targetRef === null ? '' : calloutMark(s.targetRef.callout)} ${s.targetRef?.label ?? ''}`;
 			console.log(`  ${label}`);
+			await progress(`${c.sheet}!${s.row}`, false);
 			const run = await runStep(runner, c, s, out);
 			steps.push(run);
 			console.log(
@@ -1267,6 +1293,7 @@ async function main(): Promise<void> {
 	} finally {
 		await runner.close();
 		await browser.close();
+		await progress(null, true);
 	}
 	console.log(
 		`앱을 연 횟수: ${runner.opens} (남은 상태 때문에 ${runner.cleanRelaunches}) · 처음 화면으로 키로 되돌린 횟수: ${runner.resets}` +

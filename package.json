@@ -15,6 +15,7 @@
 		"typecheck": "pnpm -r --if-present typecheck",
 		"test": "vitest run",
 		"test:watch": "vitest",
+		"web": "pnpm --filter @auto-qa/web dev",
 		"sample:dev": "pnpm --filter @auto-qa/sample-tv-app dev",
 		"sample:verify": "pnpm --filter @auto-qa/sample-tv-app verify",
 		"spike:focus": "pnpm --filter @auto-qa/spike-p0-2-focus start",
