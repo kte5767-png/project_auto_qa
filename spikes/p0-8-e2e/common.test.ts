@@ -30,12 +30,36 @@ const scope = [
 
 describe('itemByText', () => {
 	it('보이는 목록 항목 글자 하나에만 낱말이 모두 들어 있으면 그 항목', () => {
-		expect(itemByText('Place', obs, scope.map(([n, d]) => [n, { ...d }]))?.slice(1)).toEqual([1, 'Place 3']);
-		expect(itemByText('bali', obs, scope.map(([n, d]) => [n, { ...d }]))?.[0][0]).toBe('결과');
+		expect(
+			itemByText(
+				'Place',
+				obs,
+				scope.map(([n, d]) => [n, { ...d }])
+			)?.slice(1)
+		).toEqual([1, 'Place 3']);
+		expect(
+			itemByText(
+				'bali',
+				obs,
+				scope.map(([n, d]) => [n, { ...d }])
+			)?.[0][0]
+		).toBe('결과');
 	});
 
 	it('여러 항목에 맞거나 없으면 정하지 않는다', () => {
-		expect(itemByText('Driving', obs, scope.map(([n, d]) => [n, { ...d }]))).toBeNull();
-		expect(itemByText('Seoul', obs, scope.map(([n, d]) => [n, { ...d }]))).toBeNull();
+		expect(
+			itemByText(
+				'Driving',
+				obs,
+				scope.map(([n, d]) => [n, { ...d }])
+			)
+		).toBeNull();
+		expect(
+			itemByText(
+				'Seoul',
+				obs,
+				scope.map(([n, d]) => [n, { ...d }])
+			)
+		).toBeNull();
 	});
 });
