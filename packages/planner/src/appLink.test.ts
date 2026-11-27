@@ -1,0 +1,251 @@
+import type { Rect } from '@auto-qa/core';
+import type { DomNode, DomSnapshot } from '@auto-qa/focus';
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_APP_LINK_OPTIONS, linkScreenToApp, sameBox, selectorFor, siblingGroups } from './appLink';
+import type { NavCallout, NavScreen } from './keymap';
+
+/** 합성 앱 화면 요소 목록 (문서 순서). parent는 앞에 나온 요소 순번 */
+function snap(defs: (Partial<DomNode> & { parent: number; rect: Rect })[]): DomSnapshot {
+	return {
+		viewport: { width: 1920, height: 1080 },
+		nodes: defs.map((d, i) => ({
+			i,
+			tag: 'div',
+			id: null,
+			classes: [],
+			spotlightId: null,
+			container: false,
+			role: null,
+			label: null,
+			ownText: '',
+			value: null,
+			focusable: false,
+			focused: false,
+			probes: [],
+			...d
+		})),
+		truncated: false,
+		errors: []
+	};
+}
+
+const r = (x: number, y: number, width: number, height: number): Rect => ({ x, y, width, height });
+
+/**
+ * 합성 검색 화면: 0 body, 1 패널, 2 검색창 감싸개(같은 상자), 3 입력란, 4 추천 검색어 묶음(번호 바뀌는 spotlight id),
+ * 5~7 검색어 버튼, 8 Travel Now 묶음, 9 제목, 10~11 카드
+ */
+const APP = snap([
+	{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+	{ parent: 0, id: 'searchPanel', rect: r(0, 0, 1920, 1080) },
+	{ parent: 1, classes: ['SearchField_wrap__x1'], rect: r(380, 60, 1160, 90) },
+	{
+		parent: 2,
+		tag: 'input',
+		classes: ['SearchField_input__k9', 'spottable', 'SearchField_focused__z2'],
+		label: 'Search your place.',
+		focusable: true,
+		rect: r(382, 62, 1156, 86)
+	},
+	{ parent: 1, spotlightId: 'container-3', classes: ['Keywords_list__a7'], rect: r(100, 220, 1200, 70) },
+	{
+		parent: 4,
+		tag: 'button',
+		classes: ['Chip_chip__q1', 'spottable'],
+		ownText: 'Tokyo',
+		focusable: true,
+		rect: r(100, 220, 200, 70)
+	},
+	{
+		parent: 4,
+		tag: 'button',
+		classes: ['Chip_chip__q1', 'spottable'],
+		ownText: 'Paris',
+		focusable: true,
+		rect: r(320, 220, 200, 70)
+	},
+	{
+		parent: 4,
+		tag: 'button',
+		classes: ['Chip_chip__q1', 'spottable'],
+		ownText: 'Seoul',
+		focusable: true,
+		rect: r(540, 220, 200, 70)
+	},
+	{ parent: 1, classes: ['TravelNow_section__m3'], rect: r(100, 330, 1700, 400) },
+	{ parent: 8, tag: 'h2', classes: ['TravelNow_title__m4'], ownText: 'Travel Now', rect: r(100, 330, 400, 50) },
+	{
+		parent: 8,
+		classes: ['Card_card__c1', 'spottable'],
+		ownText: 'Jeju Island',
+		focusable: true,
+		rect: r(100, 400, 400, 300)
+	},
+	{
+		parent: 8,
+		classes: ['Card_card__c1', 'spottable'],
+		ownText: 'Busan',
+		focusable: true,
+		rect: r(520, 400, 400, 300)
+	}
+]);
+
+const callout = (
+	no: string,
+	name: string,
+	texts: string[],
+	rect: Rect | null,
+	keys: NavCallout['keys'] = {}
+): NavCallout => ({
+	no,
+	names: [name],
+	texts,
+	rect,
+	keys
+});
+
+const NAV: NavScreen = {
+	screenId: '4.2',
+	title: '검색',
+	callouts: [
+		// 목업 위치는 대략값 (실제와 수십 px 어긋남)
+		callout('1', '검색창 영역', ['Search your place.'], r(400, 70, 1100, 80), { down: '추천 검색어로 이동' }),
+		// 목업의 예시 데이터는 앱 데이터와 다르다 (Tokyo만 같음)
+		callout('2', '추천 검색어', ['Tokyo', 'London', 'Rome'], r(90, 210, 1100, 80), { up: '검색창으로 이동' }),
+		callout('3', 'Travel Now', ['Travel Now', 'Card title'], r(110, 340, 1650, 380))
+	]
+};
+
+describe('linkScreenToApp', () => {
+	const link = linkScreenToApp(NAV, APP);
+	const byNo = new Map(link.callouts.map((c) => [c.no, c]));
+
+	it('글자·위치·포커스 가능 여부로 콜아웃마다 앱 요소를 고른다', () => {
+		expect(sameBox(APP, byNo.get('1')?.best?.node ?? -1, 3, DEFAULT_APP_LINK_OPTIONS.sameBoxIou)).toBe(true);
+		expect(byNo.get('2')?.best?.node).toBe(4);
+		expect(byNo.get('3')?.best?.node).toBe(8);
+	});
+
+	it('감싸기만 하는 요소는 같은 상자로 묶고 다음 후보에는 넣지 않는다', () => {
+		const one = byNo.get('1');
+		expect(one?.sameBox.map((c) => c.node)).toEqual(expect.arrayContaining([2, 3]));
+		expect(one?.alternatives.map((a) => a.node)).not.toContain(2);
+		expect(one?.alternatives.map((a) => a.node)).not.toContain(3);
+	});
+
+	it('선택자는 하나만 맞고, 상태 클래스·번호가 바뀌는 이름은 쓰지 않는다', () => {
+		const one = byNo.get('1')?.selector;
+		expect(one?.unique).toBe(true);
+		expect(one?.selector).not.toContain('focused');
+		const two = byNo.get('2')?.selector;
+		expect(two).toMatchObject({ selector: '.Keywords_list__a7', unique: true, stable: true, count: 1 });
+		expect(byNo.get('3')?.selector?.selector).toBe('.TravelNow_section__m3');
+	});
+
+	it('묶음 안에 같은 클래스의 포커스 가능 항목이 여럿이면 items 선택자도 낸다', () => {
+		expect(byNo.get('2')?.selector?.items).toBe('.Chip_chip__q1');
+		expect(byNo.get('3')?.selector?.items).toBe('.Card_card__c1');
+		expect(byNo.get('1')?.selector?.items).toBeUndefined();
+	});
+
+	it('찾지 못하면 고르지 않는다', () => {
+		const far = linkScreenToApp({ ...NAV, callouts: [callout('9', '없는 영역', ['Nothing here'], null)] }, APP)
+			.callouts[0];
+		expect(far?.best).toBeNull();
+		expect(far?.reason).toContain('찾지 못함');
+	});
+
+	it('같은 점수의 다른 상자가 있으면 애매함으로 표시한다', () => {
+		const two = snap([
+			{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+			{ parent: 0, classes: ['left'], focusable: true, rect: r(100, 400, 400, 300) },
+			{ parent: 0, classes: ['right'], focusable: true, rect: r(520, 400, 400, 300) }
+		]);
+		const twin = linkScreenToApp({ ...NAV, callouts: [callout('5', '카드', [], r(310, 400, 400, 300))] }, two)
+			.callouts[0];
+		expect(twin?.ambiguous).toBe(true);
+		expect(twin?.alternatives.length).toBeGreaterThan(0);
+	});
+});
+
+describe('selectorFor', () => {
+	it('조각 하나로 안 되면 하나만 맞는 조상 아래로 좁힌다', () => {
+		expect(selectorFor(APP, [9])?.selector).toBe('.TravelNow_title__m4');
+		// 같은 클래스 카드가 둘 → 하나로 좁힐 수 없으면 unique false
+		expect(selectorFor(APP, [10])?.unique).toBe(false);
+		// 둘을 함께 가리키면 하나의 클래스로 정확히 맞는다
+		expect(selectorFor(APP, [10, 11])).toMatchObject({ selector: '.Card_card__c1', unique: true, count: 2 });
+	});
+
+	it('번호가 바뀌는 spotlight id만 있으면 안정적이지 않다고 표시한다', () => {
+		const only = snap([
+			{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+			{ parent: 0, spotlightId: 'container-12', rect: r(0, 0, 100, 100) }
+		]);
+		expect(selectorFor(only, [1])).toMatchObject({ selector: '[data-spotlight-id="container-12"]', stable: false });
+	});
+});
+
+describe('감싸는 요소 없이 나란히 놓인 항목 (형제 묶음)', () => {
+	/** 0 body, 1 화면, 2 제목, 3~5 검색어 버튼(화면 바로 아래), 6 카드 */
+	const FLAT = snap([
+		{ parent: -1, tag: 'body', rect: r(0, 0, 1920, 1080) },
+		{ parent: 0, classes: ['screen', 'search'], rect: r(0, 0, 1920, 1080) },
+		{
+			parent: 1,
+			tag: 'h2',
+			classes: ['section-title'],
+			ownText: 'Recommended Keywords',
+			rect: r(210, 178, 367, 40)
+		},
+		{
+			parent: 1,
+			classes: ['nav-item', 'search-chip', 'spottable'],
+			ownText: 'Walking in Bali',
+			focusable: true,
+			rect: r(210, 246, 320, 66)
+		},
+		{
+			parent: 1,
+			classes: ['nav-item', 'search-chip', 'spottable'],
+			ownText: 'Driving in Hong Kong',
+			focusable: true,
+			rect: r(543, 246, 320, 66)
+		},
+		{
+			parent: 1,
+			classes: ['nav-item', 'search-chip', 'spottable'],
+			ownText: 'Family',
+			focusable: true,
+			rect: r(876, 246, 320, 66)
+		},
+		{
+			parent: 1,
+			classes: ['nav-item', 'search-card', 'spottable'],
+			ownText: 'Ubud',
+			focusable: true,
+			rect: r(210, 467, 388, 216)
+		}
+	]);
+
+	it('같은 태그·클래스의 형제를 클래스마다 묶는다 (같은 묶음은 한 번만)', () => {
+		expect(siblingGroups(FLAT)).toEqual([
+			[3, 4, 5, 6],
+			[3, 4, 5]
+		]);
+	});
+
+	it('콜아웃이 항목 줄 전체를 가리키면 형제 묶음을 고르고, 그 항목들만 맞는 선택자를 낸다', () => {
+		const link = linkScreenToApp(
+			{
+				...NAV,
+				callouts: [
+					callout('2', '추천 검색어', ['Walking in Bali', 'Romantic'], r(200, 240, 1000, 80), { up: '위로' })
+				]
+			},
+			FLAT
+		).callouts[0];
+		expect(link?.best?.nodes).toEqual([3, 4, 5]);
+		expect(link?.selector).toMatchObject({ selector: '.search-chip', count: 3, unique: true });
+	});
+});

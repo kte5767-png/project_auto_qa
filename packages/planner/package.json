@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@auto-qa/core": "workspace:*",
 		"@auto-qa/figma": "workspace:*",
+		"@auto-qa/focus": "workspace:*",
 		"@auto-qa/spec": "workspace:*"
 	}
 }

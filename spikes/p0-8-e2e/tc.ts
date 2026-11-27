@@ -5,6 +5,7 @@
  *
  *   pnpm spike:tc-run <TC.xlsx> --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec [--truth <QA 결과.xlsx>]
  *   pnpm spike:tc-run --score out/<시각>/result.json --truth <QA 결과.xlsx>
+ *   pnpm spike:tc-run --link --profile <앱 프로필.json> --spec <화면설계서 폴더>   (콜아웃 ↔ 앱 요소 자동 연결 채점, D-043 ③)
  *
  * 한 단계 = 화면설계서 콜아웃 하나의 사양(표시 내용·개수·키 동작·선택 시).
  *   1. 그 화면까지 간다 (앱 프로필의 진입 경로). 같은 화면의 단계들은 앱을 한 번만 연다 (D-038)
@@ -28,6 +29,7 @@ import {
 	nextResetStep,
 	readField,
 	sameFingerprint,
+	takeDomSnapshot,
 	sampleMotion,
 	takeFingerprint
 } from '@auto-qa/focus';
@@ -59,6 +61,8 @@ import {
 	DEFAULT_KEYMAP_OPTIONS,
 	DEFAULT_ROUTE_OPTIONS,
 	buildKeyMap,
+	containedNameScore,
+	linkScreenToApp,
 	defaultFocusTarget,
 	matchByName,
 	nameScore,
@@ -67,7 +71,7 @@ import {
 	planRoute,
 	withCalloutNames
 } from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions, NavScreen, OperationPlan } from '@auto-qa/planner';
+import type { AppScreenLink, KeyAction, KeyMapOptions, NavScreen, OperationPlan } from '@auto-qa/planner';
 import type { SpecKey } from '@auto-qa/spec';
 import {
 	listValuesAt,
@@ -100,6 +104,16 @@ import {
 import type { TcKeyTexts, Trail } from './common';
 import { BrowserHost, WebOsHost } from './host';
 import type { AppHost } from './host';
+import {
+	LINK_REPORT_FORMAT,
+	autoProbes,
+	draftCallouts,
+	gradeScreen,
+	linkReportText,
+	summarize,
+	truthProbes
+} from './linkReport';
+import type { LinkRow } from './linkReport';
 import { DEFAULT_LIVE_OPTIONS, LiveReporter, isRunId } from './live';
 import {
 	PROFILE_FORMAT,
@@ -134,6 +148,8 @@ const { values, positionals } = parseArgs({
 		out: { type: 'string', default: join(import.meta.dirname, 'out') },
 		/** 실행 없이 지난 결과(result.json)를 사람 판정과 비교 */
 		score: { type: 'string' },
+		/** TC 실행 대신 콜아웃 ↔ 앱 요소 자동 연결을 프로필 대응(정답)과 비교 (D-043 ③) */
+		link: { type: 'boolean', default: false },
 		/** 사람이 P/F 열에 결과를 적은 엑셀 (QA 결과 보고서 등, 실행할 TC 파일과 다른 파일) */
 		truth: { type: 'string' },
 		/** 일부러 틀린 TC의 바꾼 목록 (mutate.ts가 만든 <TC>.mutations.json) — 바꾼 조건을 Fail로 잡았는지 잰다 */
@@ -502,16 +518,33 @@ interface ConsequenceTarget {
 	view: string;
 }
 
-function consequenceTarget(runner: Runner, subject: string): ConsequenceTarget | null {
+/**
+ * 결과 문장의 대상("최근 검색어 영역") → 콜아웃 요소. 토글 자신(toggleRef, 예: "4.4#1")은 대상이 아니다.
+ * 고르지 못하면 이유 (이름이 맞는 후보가 없음 / 비슷한 후보가 둘 이상 / 그 화면 프로필 없음)
+ */
+function consequenceTarget(runner: Runner, subject: string, toggleRef: string): ConsequenceTarget | string {
 	const { ctx } = runner;
 	const candidates = Object.entries(ctx.registry.elements).filter(
-		([n, e]) => !n.startsWith('@') && e.callout !== undefined
+		([n, e]) => !n.startsWith('@') && e.callout !== undefined && e.callout !== toggleRef
 	);
-	const m = matchByName(subject, candidates, ([n, e]) => [n, ...(e.names ?? [])], ctx.options);
-	if (m === null) return null;
+	const namesOf = ([n, e]: (typeof candidates)[number]): string[] => [n, ...(e.names ?? [])];
+	const m = matchByName(subject, candidates, namesOf, ctx.options);
+	if (m === null) {
+		const near = candidates
+			.map((c) => ({
+				name: c[0],
+				score: Math.max(0, ...namesOf(c).map((x) => containedNameScore(subject, x, ctx.options)))
+			}))
+			.filter((x) => x.score > 0)
+			.sort((a, b) => b.score - a.score)
+			.slice(0, 3);
+		return near.length === 0
+			? `"${subject}"과 이름이 맞는 콜아웃이 없음`
+			: `"${subject}" 후보를 하나로 정할 수 없음 (${near.map((x) => `${x.name} ${x.score.toFixed(2)}`).join(', ')})`;
+	}
 	const [element, def] = m.match;
 	const screen = (def.callout ?? '').split('#')[0] ?? '';
-	if (ctx.profile.screens[screen] === undefined) return null;
+	if (ctx.profile.screens[screen] === undefined) return `${element}의 화면 ${screen}이 프로필에 없음`;
 	// 그 화면 진입 경로가 대상이 나타나기를 기다리면(4.3 "최근 검색어가 있을 경우") 없어야 하는 상태에서는 못 들어간다.
 	// 같은 패널로 표시되는 화면 중 대상을 기다리지 않고, 글자 입력·OK가 가장 적은 화면에서 본다
 	const weight = (sc: string): number | null => {
@@ -525,7 +558,9 @@ function consequenceTarget(runner: Runner, subject: string): ConsequenceTarget |
 		.filter((v): v is { sc: string; w: number } => v.w !== null)
 		.sort((a, b) => a.w - b.w);
 	const view = views[0]?.sc;
-	return view === undefined ? null : { element, screen, view };
+	return view === undefined
+		? `${element}를 볼 수 있는 화면이 없음 (진입 경로가 모두 그 요소를 기다림)`
+		: { element, screen, view };
 }
 
 const STATE_LABEL: Record<ToggleState, string> = { on: '켜짐', off: '꺼짐' };
@@ -563,14 +598,14 @@ async function checkToggleConsequences(
 	let last: ConsequenceTarget | null = null;
 	const resolved: (ConsequenceItem & { t: ConsequenceTarget; note: string })[] = [];
 	for (const it of items) {
-		const t = consequenceTarget(runner, it.c.subject);
-		if (t !== null) {
+		const t = consequenceTarget(runner, it.c.subject, `${toggleScreen}#${no}`);
+		if (typeof t !== 'string') {
 			last = t;
 			resolved.push({ ...it, t, note: '' });
 		} else if (last !== null) {
 			resolved.push({ ...it, t: last, note: ` ("${it.c.subject}" = 앞 조건의 ${last.element})` });
 		} else {
-			review([it], `"${it.c.subject}"에 대응된 요소가 없어 확인할 수 없음`);
+			review([it], `대상 요소를 정하지 못해 확인할 수 없음: ${t}`);
 		}
 	}
 	if (resolved.length === 0) return out;
@@ -2389,6 +2424,127 @@ async function writeResults(tcFile: string, steps: readonly StepRun[], overwrite
 
 // ── main ────────────────────────────────────────────────
 
+async function openHost(url: string, headed: boolean, windowScale: number | undefined): Promise<AppHost> {
+	return values.device
+		? await WebOsHost.connect({
+				root: ROOT,
+				...(values.app === undefined ? {} : { appId: values.app }),
+				onPairingPrompt: () => console.log('  → TV 화면에 뜬 연결 요청에서 "허용"을 눌러 주세요')
+			})
+		: new BrowserHost(await launchBrowser({ headless: !headed, windowScale }), url);
+}
+
+/**
+ * 콜아웃 ↔ 앱 요소 자동 연결 채점 (D-043 ③): 프로필 화면마다 (진입 경로는 아직 프로필 것) 들어가 화면 요소를 읽고,
+ * 화면설계서 콜아웃(목업 글자·위치·키 동작)만으로 앱 요소와 선택자를 고른 뒤 프로필 대응(정답)과 비교한다.
+ * TC 파일은 쓰지 않는다. 결과: out/link-<시각>/link-report.md·json, 화면별 요소 목록(snapshots/), 프로필 초안
+ */
+async function linkMain(
+	profile: AppProfile,
+	registry: ElementRegistry,
+	specNavs: ReadonlyMap<string, NavScreen>,
+	options: KeyMapOptions
+): Promise<void> {
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+	const out = join(resolve(cwd, values.out), `link-${stamp}`);
+	await mkdir(join(out, 'snapshots'), { recursive: true });
+	const url = values.url ?? profile.url;
+	const startedAt = new Date().toISOString();
+	const live = new LiveReporter(
+		out,
+		() => ({
+			format: PROGRESS_FORMAT,
+			version: 2,
+			tc: '(연결 채점)',
+			tcPath: '',
+			url,
+			startedAt,
+			planned: [],
+			steps: []
+		}),
+		{ ...DEFAULT_LIVE_OPTIONS, frameMs: 0 }
+	);
+	const keyMaps = new Map<string, KeyAction[]>();
+	for (const [screen, nav] of specNavs) keyMaps.set(screen, buildKeyMap(nav, options));
+	const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
+	const host = await openHost(url, values.headed, windowScale);
+	const ctx: Ctx = {
+		host,
+		profile,
+		registry,
+		timing: { ...DEFAULT_TIMING, ...profile.timing },
+		pauseMs,
+		url,
+		keyMaps,
+		specKeyMaps: keyMaps,
+		navs: new Map(specNavs),
+		options,
+		live
+	};
+	const runner = new Runner(ctx);
+	const rows: LinkRow[] = [];
+	const links: AppScreenLink[] = [];
+	const errors: string[] = [];
+	const focusables = runner.reset.fingerprint.focusables;
+	try {
+		for (const screen of Object.keys(profile.screens)) {
+			const nav = specNavs.get(screen);
+			if (nav === undefined || nav.callouts.length === 0) {
+				errors.push(`${screen}: 화면설계서에 이 화면(콜아웃)이 없음`);
+				continue;
+			}
+			console.log(`  ${screen} ${nav.title ?? ''} (콜아웃 ${nav.callouts.length}개)`);
+			const trail: Trail[] = [];
+			const error = await runner.open(screen, trail, true);
+			const driver = runner.app?.driver;
+			if (error !== null || driver === undefined) {
+				errors.push(`${screen}: ${error ?? '앱이 열려 있지 않음'}`);
+				continue;
+			}
+			const probes = truthProbes(registry, screen);
+			const snap = await takeDomSnapshot(driver, { probes, ...(focusables === undefined ? {} : { focusables }) });
+			if (snap.errors.length > 0) console.log(`    [주의] ${snap.errors.join(' / ')}`);
+			const link = linkScreenToApp(nav, snap);
+			const again = await takeDomSnapshot(driver, { probes: autoProbes(link) });
+			const graded = gradeScreen(screen, link, snap, again, probes);
+			for (const r of graded) {
+				console.log(
+					`    ${calloutMark(r.no)} ${r.name ?? ''} → ${r.grade}${r.ambiguous ? ' (애매함)' : ''} ${r.auto?.selector ?? '-'} / 정답 ${r.truth ?? '-'}`
+				);
+			}
+			rows.push(...graded);
+			links.push(link);
+			await writeFile(join(out, 'snapshots', `${screen}.json`), `${JSON.stringify(snap)}\n`);
+			await writeFile(join(out, 'snapshots', `${screen}.png`), await driver.screenshot());
+		}
+	} finally {
+		await runner.close();
+		await host.close();
+		await live.finish(true);
+	}
+	const text = linkReportText(rows, errors);
+	console.log(`\n${text.slice(0, 5).join('\n')}`);
+	await writeFile(join(out, 'link-report.md'), `${text.join('\n')}\n`);
+	await writeFile(
+		join(out, 'link-report.json'),
+		`${JSON.stringify(
+			{
+				format: LINK_REPORT_FORMAT,
+				version: 1,
+				url,
+				summary: summarize(rows),
+				rows,
+				errors,
+				draft: draftCallouts(links),
+				links
+			},
+			null,
+			'\t'
+		)}\n`
+	);
+	console.log(`→ ${join(out, 'link-report.md')}`);
+}
+
 async function main(): Promise<void> {
 	if (values.score !== undefined) {
 		if (values.truth === undefined && values.mutations === undefined) {
@@ -2414,7 +2570,7 @@ async function main(): Promise<void> {
 	}
 
 	const tcFile = positionals[0];
-	if (tcFile === undefined || values.profile === undefined) {
+	if ((tcFile === undefined && !values.link) || values.profile === undefined) {
 		throw new Error('사용법: pnpm spike:tc-run <TC.xlsx> --profile <앱 프로필.json> --spec <화면설계서 폴더>');
 	}
 	const raw = JSON.parse(await readFile(resolve(cwd, values.profile), 'utf8')) as unknown;
@@ -2426,6 +2582,12 @@ async function main(): Promise<void> {
 	const specFiles = await jsonFiles(values.spec, cwd);
 	const specNavs = specFiles.length === 0 ? null : await loadNavScreens(specFiles);
 	if (specNavs !== null) console.log(`화면설계서 화면 ${specNavs.size}개: ${[...specNavs.keys()].join(', ')}`);
+	if (values.link) {
+		if (specNavs === null) throw new Error('--link에는 --spec(화면설계서 폴더)이 필요합니다');
+		await linkMain(profile, registry, specNavs, options);
+		return;
+	}
+	if (tcFile === undefined) throw new Error('TC 파일이 필요합니다');
 
 	const tcPath = resolve(cwd, tcFile);
 	if (values.truth !== undefined && resolve(cwd, values.truth) === tcPath) {
@@ -2506,13 +2668,7 @@ async function main(): Promise<void> {
 	let completed = false;
 	try {
 		const { windowScale, pauseMs } = await viewOptions(values.headed, values.scale, values.slow);
-		const host: AppHost = values.device
-			? await WebOsHost.connect({
-					root: ROOT,
-					...(values.app === undefined ? {} : { appId: values.app }),
-					onPairingPrompt: () => console.log('  → TV 화면에 뜬 연결 요청에서 "허용"을 눌러 주세요')
-				})
-			: new BrowserHost(await launchBrowser({ headless: !values.headed, windowScale }), url);
+		const host = await openHost(url, values.headed, windowScale);
 		if (values.device) console.log(`실행 환경: ${host.label}`);
 		const ctx: Ctx = {
 			host,

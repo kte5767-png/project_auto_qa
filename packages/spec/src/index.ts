@@ -18,6 +18,7 @@ export {
 	frameTitle,
 	linkCallout,
 	linkSpecToGui,
+	meaningful,
 	mockupTexts,
 	rankGuiFrames,
 	textSimilarity

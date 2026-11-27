@@ -144,6 +144,18 @@ TC 한 줄은 콜아웃 하나의 사양입니다. **앱은 한 번만 열고**,
 - 프로필에 없는 화면·콜아웃은 미실행으로 남기고 이유를 적습니다.
 - `reset`(선택, D-039): `layers`(겹친 층 선택자, 기본 `#floatLayer > *, [role="dialog"], …`), `focusables`, `minSimilarity`, `backKey`, `closePopupKey`, `forbidden`(기본 `["OK"]`). 영역 나가기 키는 공통 요소의 `exit`를 씁니다. 지금은 사람이 적지만, 화면설계서 정책 페이지(Back 정책)에서 로컬 LLM이 초안을 만드는 것이 다음 단계입니다.
 
+### 콜아웃 ↔ 앱 요소 자동 연결 채점 (`--link`, D-043 ③)
+
+```bash
+pnpm spike:tc-run --link --profile spikes/p0-8-e2e/profile.local.json --spec spikes/p0-8-e2e/spec [--device]
+```
+
+- 프로필 화면마다 들어가(진입 경로는 아직 프로필 것) 화면 요소를 읽고(`@auto-qa/focus` `takeDomSnapshot`: 글자·위치·id·클래스·`data-spotlight-id`·role·aria-label·포커스 가능 여부), 화면설계서 콜아웃의 목업 글자·위치·키 동작만으로 앱 요소와 선택자를 고릅니다(`@auto-qa/planner` `linkScreenToApp`).
+- 점수: 글자 F1 + 겹침 + 근접 + (키 동작이 적힌 콜아웃이면) 포커스 가능 요소. 목업 글자가 화면 어디에도 없으면(예시 데이터) 위치로만 봅니다. 감싸는 요소 없이 나란히 놓인 항목은 형제 묶음으로 봅니다.
+- 선택자는 상태 클래스(focused·selected…)와 번호가 바뀌는 이름(`container-12`)을 피하고, 그 요소(들)만 정확히 맞는 것으로. 안에 같은 클래스 항목이 여럿이면 `items`도 냅니다. 다시 읽은 화면에서 같은 자리에 맞는지 확인합니다.
+- 1·2위 점수 차가 작으면 "애매함"(로컬 AI가 후보 중에서 고르거나 사람 확인, D-045). 사람이 적은 프로필 대응은 채점 정답으로만 씁니다.
+- 결과: `out/link-<시각>/link-report.md`(일치·감쌈·다름·못 고름, 정답이 다음 후보에 있던 수), `link-report.json`(`draft` = 프로필 콜아웃 초안), `snapshots/<화면>.json·png`
+
 ### 정확도 (사람 판정과 비교)
 
 사람이 P/F를 적은 **다른 파일**(같은 TC 양식의 QA 결과 보고서 등)과 비교합니다. 실행할 때 `--truth`를 함께 주거나, 실행 없이 지난 결과로 비교합니다. 실행할 TC 파일 자체는 정답으로 쓸 수 없습니다(결과를 거기에 쓰므로).

@@ -6,3 +6,4 @@ export * from './textValue';
 export * from './tcKeys';
 export * from './defaultFocus';
 export * from './operation';
+export * from './appLink';
