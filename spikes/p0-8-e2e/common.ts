@@ -246,9 +246,23 @@ export function focusText(obs: Observation): string {
 	return `${f.tag}${f.spotlightId === null ? '' : `#${f.spotlightId}`} "${f.text.slice(0, 30)}"`;
 }
 
+/** 기록이 늘 때 부르는 곳 (사용자 UI 실시간 표시용, 판정과 무관). 실행 스크립트가 하나만 정한다 */
+let trailListener: (() => void) | null = null;
+
+export function onTrail(listener: (() => void) | null): void {
+	trailListener = listener;
+}
+
 export function record(trail: Trail[], t: Trail, indent = '  진입 '): void {
 	trail.push(t);
 	console.log(`${indent}${trailLabel(t)} → ${t.focus}${t.stable ? '' : ' (안정화 시간 초과)'}`);
+	trailListener?.();
+}
+
+/** 로그 없이 기록만 (홈 되돌리기처럼 로그에는 한 줄로 요약하는 키) */
+export function note(trail: Trail[], t: Trail): void {
+	trail.push(t);
+	trailListener?.();
 }
 
 export async function runEntry(

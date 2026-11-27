@@ -114,6 +114,12 @@ TC 한 줄은 콜아웃 하나의 사양입니다. **앱은 한 번만 열고**,
 
 결과: TC 파일(P/F·이유 칸)과 백업, `out/tc-<시각>/`에 `report.md`(확인 필요 목록 포함), `result.json`, 단계별 캡처.
 
+실행 중 상황(사용자 UI `apps/web` 검수 중 화면이 읽음, 판정과 무관, `live.ts`):
+
+- `progress.json` (`auto-qa/tc-run-progress` version 2): 끝난 단계에 더해 `stage`(preparing·running·writing·done), 지금 단계 `current`·`currentStartedAt`, 단계 안에서 하는 일 `phase`, 지금 단계에서 누른 키 `currentTrail`, 다 못 마치고 끝났으면 `stopped`. 키 하나·하는 일이 바뀔 때마다 최소 200ms 간격으로 모아 다시 쓰고, 임시 파일에 쓴 뒤 이름을 바꿔 반쯤 쓴 파일을 읽지 않게 합니다
+- `live.jpg`: 앱 화면의 가장 최근 프레임 (CDP screencast, 960×540 JPEG). 화면이 다시 그려질 때만 오고 앱 DOM을 바꾸지 않아 안정화 대기·판정에 영향이 없습니다. `--live-frame-ms`(기본 250, 0이면 끔)
+- `--run tc-<이름>`: 실행 폴더 이름 (사용자 UI가 정해 넘김)
+
 ### 앱 프로필 (`auto-qa/app-profile`, `*.local.json`)
 
 - `elements`: 공통 요소 (화면 밖 대상 `GNB` 등, `names`로 화면설계서 문장과 대응, `exit`는 거기서 화면으로 돌아오는 키)

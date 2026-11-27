@@ -547,6 +547,83 @@ tr.click:hover td {
 	background: var(--light);
 	color: var(--navy);
 }
+/* 키가 아닌 동작 (앱 열기·홈으로·글자 입력) */
+.key.act {
+	font-weight: 600;
+	font-size: 11.5px;
+}
+.key.act.dim {
+	background: #eef1f6;
+	color: var(--gray);
+}
+.key.last {
+	animation: pop 0.25s ease-out;
+	box-shadow: 0 0 0 3px rgba(30, 76, 143, 0.18);
+}
+@keyframes pop {
+	from {
+		transform: scale(0.8);
+		opacity: 0.4;
+	}
+}
+.focusline {
+	margin-top: 6px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 실시간 연결 상태 */
+.conn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: #fff3d1;
+	color: #9a6f00;
+	font-size: 11px;
+	font-weight: 700;
+}
+.conn i {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--review);
+	animation: blink 1.2s infinite;
+}
+.conn.on {
+	background: #e3f4ec;
+	color: var(--pass);
+}
+.conn.on i {
+	background: var(--pass);
+	animation: none;
+}
+
+/* 단계 안에서 지금 하는 일 */
+.phase {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 13.5px;
+	font-weight: 700;
+	color: var(--blue);
+}
+.phase i {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--blue);
+	animation: blink 1.2s infinite;
+}
+.steplist .item .sub-phase {
+	display: block;
+	margin-top: 3px;
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--blue);
+}
 .livebadge {
 	background: var(--fail);
 	color: #fff;
@@ -601,9 +678,36 @@ tr.click:hover td {
 	color: #cfd8e6;
 	border-radius: 10px;
 	padding: 12px;
-	max-height: 220px;
+	max-height: 260px;
 	overflow: auto;
 	white-space: pre-wrap;
+}
+.log .l-step {
+	color: #fff;
+	font-weight: 700;
+	margin-top: 4px;
+}
+.log .l-pass {
+	color: #6fd3a3;
+}
+.log .l-fail {
+	color: #ff8a8a;
+	font-weight: 700;
+}
+.log .l-review {
+	color: #f2c94c;
+}
+.log .l-muted {
+	color: #8b95a8;
+}
+.qcard.fresh {
+	animation: slidein 0.35s ease-out;
+}
+@keyframes slidein {
+	from {
+		transform: translateY(-6px);
+		opacity: 0;
+	}
 }
 
 /* 결과: 단계 격자 */
