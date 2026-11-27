@@ -42,5 +42,6 @@ export function navScreenFromSpec(
 			keys: c.description?.keys ?? {}
 		};
 	});
-	return { screenId: screen.screenId, title: screen.title, callouts };
+	const defaultFocus = screen.parts.map((p) => p.defaultFocus).find((d) => d !== null && d.trim() !== '') ?? null;
+	return { screenId: screen.screenId, title: screen.title, callouts, defaultFocus };
 }

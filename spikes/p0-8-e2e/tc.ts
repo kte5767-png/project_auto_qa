@@ -30,8 +30,18 @@ import {
 	splitClauses
 } from '@auto-qa/judge';
 import type { Check, CheckResult, Clause, StepVerdict, Verdict } from '@auto-qa/judge';
-import { DEFAULT_KEYMAP_OPTIONS, DEFAULT_ROUTE_OPTIONS, nameScore, planRoute } from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions } from '@auto-qa/planner';
+import {
+	DEFAULT_KEYMAP_OPTIONS,
+	DEFAULT_ROUTE_OPTIONS,
+	buildKeyMap,
+	defaultFocusTarget,
+	nameScore,
+	overrideKeyTexts,
+	planRoute,
+	withCalloutNames
+} from '@auto-qa/planner';
+import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
+import type { SpecKey } from '@auto-qa/spec';
 import {
 	listValuesAt,
 	normalize,
@@ -50,7 +60,7 @@ import {
 	checkSpecMove,
 	focusText,
 	jsonFiles,
-	loadKeyMaps,
+	loadNavScreens,
 	note,
 	onTrail,
 	record,
@@ -59,7 +69,7 @@ import {
 	target,
 	viewOptions
 } from './common';
-import type { Trail } from './common';
+import type { TcKeyTexts, Trail } from './common';
 import { DEFAULT_LIVE_OPTIONS, LiveReporter, isRunId } from './live';
 import {
 	PROFILE_FORMAT,
@@ -72,7 +82,7 @@ import {
 } from './profile';
 import type { AppProfile, ElementRegistry } from './profile';
 import { DEFAULT_TIMING } from './scenario';
-import type { Timing } from './scenario';
+import type { ElementDef, Timing } from './scenario';
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
@@ -153,6 +163,10 @@ interface Ctx {
 	pauseMs: number;
 	url: string;
 	keyMaps: Map<string, KeyAction[]> | null;
+	/** 화면설계서 문장만으로 만든 이동 지도 (TC와 다른 곳 설명용). null이면 화면설계서 없음 */
+	specKeyMaps: Map<string, KeyAction[]> | null;
+	/** 콜아웃 이름(화면설계서 + TC 단계 이름 + 프로필 이름)·위치. 키 동작을 TC 문장으로 해석할 때 쓴다 (D-046) */
+	navs: Map<string, NavScreen>;
 	options: KeyMapOptions;
 	/** 실행 중 상황을 사용자 UI에 알림 (판정과 무관) */
 	live: LiveReporter;
@@ -191,6 +205,58 @@ function listPrevKey(actions: readonly KeyAction[], no: string): RemoteKey | nul
 	if (prev !== undefined) return KEY_OF[prev.key] ?? null;
 	const next = own.find((a) => a.effect.kind === 'step' && a.effect.delta > 0);
 	return next === undefined ? null : (OPPOSITE[next.key] ?? null);
+}
+
+/**
+ * 이름으로 가리킨 대상을 찾을 요소: 이 화면 요소 + 진입 경로 앞 화면의 콜아웃 중 누르기 전 화면에 보이던 것.
+ * 4.3(최근 검색어가 있을 경우)의 "[▼] 추천 검색어 …"는 앞 화면 4.2의 추천 검색어를 가리킨다(Search!31).
+ * 보이지 않는 앞 화면 요소(다른 페이지)는 넣지 않아 같은 이름의 다른 화면 요소로 기대를 잘못 정하지 않는다
+ */
+function nameScope(registry: ElementRegistry, screen: string, before: Observation): Record<string, ElementDef> {
+	const shown = Object.entries(registry.upstream(screen)).filter(([n]) => (target(before, n)?.visible ?? 0) > 0);
+	return { ...registry.scoped(screen), ...Object.fromEntries(shown) };
+}
+
+/**
+ * 화면·콜아웃 번호별 이름: TC 단계 이름("(6) Back to Top" → "Back to Top")과 앱 프로필 이름.
+ * TC 문장은 TC가 쓰는 이름으로 콜아웃을 부르므로(화면설계서 판에 설명이 없는 콜아웃 포함) 이것으로 대응시킨다
+ */
+function calloutNameTable(profile: AppProfile, cases: readonly TcCase[]): Map<string, Record<string, string[]>> {
+	const out = new Map<string, Record<string, string[]>>();
+	const add = (screen: string, no: string, names: readonly (string | undefined)[]): void => {
+		const table = out.get(screen) ?? {};
+		const list = table[no] ?? [];
+		for (const n of names) if (n !== undefined && n.trim() !== '' && !list.includes(n.trim())) list.push(n.trim());
+		table[no] = list;
+		out.set(screen, table);
+	};
+	for (const c of cases) {
+		const screen = c.specRef?.screenId;
+		if (screen == null) continue;
+		for (const st of c.steps) if (st.targetRef !== null) add(screen, st.targetRef.callout, [st.targetRef.label]);
+	}
+	for (const [screen, def] of Object.entries(profile.screens))
+		for (const [no, co] of Object.entries(def.callouts)) add(screen, no, [co.name, ...(co.names ?? [])]);
+	return out;
+}
+
+/** 화면·콜아웃 번호별 TC 키 동작 문장 ("[▼] …"). 같은 콜아웃이 여러 단계에 있으면 나중 단계 문장 */
+function tcKeyTable(cases: readonly TcCase[]): Map<string, Record<string, Partial<Record<SpecKey, string>>>> {
+	const out = new Map<string, Record<string, Partial<Record<SpecKey, string>>>>();
+	for (const c of cases) {
+		const screen = c.specRef?.screenId;
+		if (screen == null) continue;
+		for (const st of c.steps) {
+			if (st.targetRef === null) continue;
+			const table = out.get(screen) ?? {};
+			const texts = table[st.targetRef.callout] ?? {};
+			for (const clause of splitClauses(st.expected ?? ''))
+				if (clause.key !== null) texts[clause.key] = clause.text;
+			table[st.targetRef.callout] = texts;
+			out.set(screen, table);
+		}
+	}
+	return out;
 }
 
 class Runner {
@@ -674,6 +740,29 @@ function subsetSubject(text: string, names: readonly string[], options: KeyMapOp
 
 type OkCheck = { clause: Clause; check: Check; after: 'transition' | 'no-action' | 'presence' | 'focus' };
 
+/**
+ * "화면 최상단 Default 포커스 항목"의 기대 요소 (planner defaultFocusTarget). 화면설계서 Default Focus → 맨 위 목록의 첫 항목.
+ * 목록 콜아웃 = 앱 요소 목록에서 항목 선택자(items)가 있는 콜아웃. 정하지 못하면 null (진입 시 포커스로 판정)
+ */
+function defaultFocusOf(
+	ctx: Ctx,
+	screen: string,
+	clauseText: string
+): { element: string; firstItem: boolean; basis: string } | null {
+	const nav = ctx.navs.get(screen);
+	if (nav === undefined) return null;
+	const byNo = new Map<string, string>();
+	const lists = new Set<string>();
+	for (const [name, def] of Object.entries(ctx.registry.scoped(screen))) {
+		const [sc, no] = (def.callout ?? '').split('#');
+		if (sc !== screen || no === undefined || no === '') continue;
+		byNo.set(no, name);
+		if ((def.items ?? '') !== '') lists.add(no);
+	}
+	const dft = defaultFocusTarget(nav, clauseText, nav.defaultFocus ?? null, lists, ctx.options);
+	const element = dft === null ? undefined : byNo.get(dft.no);
+	return dft === null || element === undefined ? null : { element, firstItem: dft.firstItem, basis: dft.basis };
+}
 async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, trail: Trail[]): Promise<StepRun> {
 	const { ctx } = runner;
 	const started = Date.now();
@@ -836,9 +925,17 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 
 	// 키 동작: 목표 첫 항목에서 키 하나씩. 누른 뒤에는 키로 목표에 돌아온다 (못 돌아오면 그때만 다시 연다)
 	let blocked: string | null = null;
+	// 판정 기준은 TC (D-044·D-046): 이 단계의 키 동작 문장으로 기대 위치를 정한다. 화면설계서는 이름·위치·길 찾기에만
+	const tcKeys: TcKeyTexts = {
+		screen,
+		no,
+		texts: Object.fromEntries(
+			keyChecks.flatMap(({ clause }) => (clause.key === null ? [] : [[clause.key, clause.text]]))
+		) as TcKeyTexts['texts']
+	};
 	for (const { clause, check } of keyChecks) {
-		if (ctx.keyMaps?.get(screen) === undefined) {
-			results.push(res(clause, check, null, `화면설계서에 ${screen} 이동 지도가 없어 키 동작을 비교할 수 없음`));
+		if (ctx.navs.get(screen) === undefined && ctx.keyMaps?.get(screen) === undefined) {
+			results.push(res(clause, check, null, `${screen} 콜아웃 정보가 없어 키 동작을 비교할 수 없음`));
 			continue;
 		}
 		if (blocked !== null) {
@@ -851,7 +948,7 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 			continue;
 		}
 		// 같은 화면·같은 출발(콜아웃 첫 항목)·같은 키는 결과가 같다고 보고 한 번만 실행 (이동 이력 조건은 실제 지나간 위치로 기대값을 계산)
-		const cacheKey = `${screen}|${no}|${key}`;
+		const cacheKey = `${screen}|${no}|${key}|${clause.text}`;
 		const cached = runner.moves.get(cacheKey);
 		if (cached !== undefined) {
 			results.push({ ...cached, clause, check });
@@ -879,11 +976,13 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 		record(trail, { key, focus: focusText(r.obs), stable: r.stable }, '    ');
 		const move = checkSpecMove(
 			ctx.registry.scoped(screen),
-			{ keyMaps: ctx.keyMaps, options: ctx.options },
+			{ keyMaps: ctx.keyMaps, options: ctx.options, navs: ctx.navs, specOnly: ctx.specKeyMaps },
 			before,
 			key,
 			r.obs,
-			remembered
+			remembered,
+			nameScope(ctx.registry, screen, before),
+			tcKeys
 		);
 		results.push({ ...move, clause, check });
 		runner.moves.set(cacheKey, move);
@@ -942,6 +1041,23 @@ async function runStep(runner: Runner, c: TcCase, s: TcStep, outDir: string, tra
 								check,
 								'needs-review',
 								`OK 후 포커스 ${focusText(after)} — 어느 요소여야 하는지 정하지 못함`
+							)
+						);
+						continue;
+					}
+					const dft = defaultFocusOf(ctx, screen, clause.text);
+					if (dft !== null) {
+						const t = target(after, dft.element);
+						const ok = t?.hasFocus === true && (!dft.firstItem || t.itemCount <= 1 || t.focusItem === 0);
+						const want = `${dft.element}${dft.firstItem ? '[0]' : ''}`;
+						results.push(
+							res(
+								clause,
+								check,
+								ok ? 'pass' : 'fail',
+								ok
+									? `OK → 기본 포커스 ${want} (${dft.basis})`
+									: `OK 후 포커스가 기본 위치가 아님: 기대 ${want} (${dft.basis}) / 실제 ${focusText(after)}`
 							)
 						);
 						continue;
@@ -1238,8 +1354,8 @@ async function main(): Promise<void> {
 	const registry = buildRegistry(profile);
 	const options: KeyMapOptions = { ...DEFAULT_KEYMAP_OPTIONS, aliases: profile.aliases ?? {} };
 	const specFiles = await jsonFiles(values.spec, cwd);
-	const keyMaps = specFiles.length === 0 ? null : await loadKeyMaps(specFiles, options);
-	if (keyMaps !== null) console.log(`화면설계서 화면 ${keyMaps.size}개: ${[...keyMaps.keys()].join(', ')}`);
+	const specNavs = specFiles.length === 0 ? null : await loadNavScreens(specFiles);
+	if (specNavs !== null) console.log(`화면설계서 화면 ${specNavs.size}개: ${[...specNavs.keys()].join(', ')}`);
 
 	const tcPath = resolve(cwd, tcFile);
 	if (values.truth !== undefined && resolve(cwd, values.truth) === tcPath) {
@@ -1249,6 +1365,23 @@ async function main(): Promise<void> {
 	}
 	const grid = await readWorkbook(tcPath);
 	const cases = normalize(grid, suggestProfile(grid)).cases;
+	// 콜아웃 이름: 화면설계서 이름 + TC 단계 이름("(6) Back to Top") + 프로필 이름. TC 문장 속 이름을 콜아웃에 대응시킨다
+	const navs = new Map<string, NavScreen>();
+	for (const [screen, names] of calloutNameTable(profile, cases))
+		navs.set(screen, withCalloutNames(specNavs?.get(screen) ?? null, screen, names));
+	for (const [screen, nav] of specNavs ?? []) if (!navs.has(screen)) navs.set(screen, nav);
+	// 이동 지도(길 찾기): 화면설계서 키 동작에 TC 단계의 키 동작 문장을 덮어 쓴다 (판정 기준은 TC, D-046).
+	// 화면설계서에 이동 지도가 없는 화면(팝업 등)도 TC 문장으로 길을 찾는다
+	const tcKeys = tcKeyTable(cases);
+	const keyMaps = new Map<string, KeyAction[]>();
+	const specKeyMaps = specNavs === null ? null : new Map<string, KeyAction[]>();
+	for (const [screen, nav] of navs) {
+		let actions = buildKeyMap(nav, options);
+		if (specNavs?.has(screen) === true) specKeyMaps?.set(screen, actions);
+		for (const [no, texts] of Object.entries(tcKeys.get(screen) ?? {}))
+			actions = overrideKeyTexts(actions, nav, no, texts, options).actions;
+		keyMaps.set(screen, actions);
+	}
 	const only = values.only === undefined ? null : new Set(values.only.split(',').map((x) => x.trim()));
 	const prefix = values.screen;
 	const selected: [TcCase, TcStep][] = [];
@@ -1311,6 +1444,8 @@ async function main(): Promise<void> {
 			pauseMs,
 			url,
 			keyMaps,
+			specKeyMaps,
+			navs,
 			options,
 			live
 		};

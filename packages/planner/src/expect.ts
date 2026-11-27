@@ -1,5 +1,5 @@
 import type { SpecKey } from '@auto-qa/spec';
-import { DEFAULT_KEYMAP_OPTIONS, describeEffect, nameScore } from './keymap';
+import { DEFAULT_KEYMAP_OPTIONS, describeEffect, nameScore, nameTokens } from './keymap';
 import type { KeyAction, KeyMapOptions } from './keymap';
 
 /**
@@ -127,9 +127,34 @@ export function expectAfterKey(
 	}
 }
 
+/** p의 낱말이 q에 모두 들어 있는가 (같은 낱말이 여러 번이면 그 수만큼) */
+function covered(p: readonly string[], q: readonly string[]): boolean {
+	const rest = [...q];
+	return p.every((t) => {
+		const i = rest.indexOf(t);
+		if (i < 0) return false;
+		rest.splice(i, 1);
+		return true;
+	});
+}
+
+/**
+ * 한쪽 이름의 낱말이 다른 쪽에 모두 들어 있을 때만 낱말 일치 점수, 아니면 0.
+ * "추천 검색어" ↔ "최근 검색어"처럼 양쪽에 서로 다른 낱말이 있으면 공통 낱말("검색어")이 있어도 다른 대상이다.
+ * "GNB" ↔ "GNB 검색", "추천 검색어" ↔ "4.2 ② 추천 검색어"는 한쪽이 다른 쪽에 들어 있어 점수를 준다.
+ */
+export function containedNameScore(a: string, b: string, options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS): number {
+	const x = nameTokens(a, options);
+	const y = nameTokens(b, options);
+	if (!covered(x, y) && !covered(y, x)) return 0;
+	return nameScore(a, b, options);
+}
+
 /**
  * 이름으로 후보 고르기 (콜아웃이 아닌 요소·화면 밖 이름 ↔ 사람이 지정한 요소).
- * 가장 높은 점수가 기준 이상이고 2위와 차이가 충분할 때만 고른다.
+ * 이름 낱말이 한쪽에 모두 들어 있는 것만 후보로 보고(containedNameScore), 가장 높은 점수가 기준 이상이고
+ * 2위와 차이가 충분할 때만 고른다. 일부 낱말만 같은 다른 요소를 골라 기대 위치를 잘못 정하면 오탐(Fail)이 나므로
+ * 맞는 것이 없으면 고르지 않는다(확인 불가).
  */
 export function matchByName<T>(
 	name: string,
@@ -138,7 +163,7 @@ export function matchByName<T>(
 	options: KeyMapOptions = DEFAULT_KEYMAP_OPTIONS
 ): { match: T; score: number } | null {
 	const scored = candidates
-		.map((c) => ({ c, score: Math.max(0, ...namesOf(c).map((n) => nameScore(name, n, options))) }))
+		.map((c) => ({ c, score: Math.max(0, ...namesOf(c).map((n) => containedNameScore(name, n, options))) }))
 		.sort((a, b) => b.score - a.score);
 	const [first, second] = scored;
 	if (first === undefined || first.score < options.minNameScore) return null;

@@ -144,6 +144,11 @@ export interface ElementRegistry {
 	detect(screen: string): string;
 	/** 공통 요소 + 이 화면의 콜아웃만 (화면설계서 이동 판정에서 다른 화면의 같은 요소와 섞이지 않게) */
 	scoped(screen: string): Record<string, ElementDef>;
+	/**
+	 * 진입 경로가 거치는 화면(from)의 콜아웃 (이 화면 제외). 4.3(최근 검색어가 있을 경우)처럼 앞 화면 위에 영역이 더해진
+	 * 화면에서 문장이 앞 화면의 요소("추천 검색어")를 가리킬 때 이름으로 찾는 후보. 실제로 보이는 것만 써야 한다
+	 */
+	upstream(screen: string): Record<string, ElementDef>;
 	/** 그 화면에서 관찰할 요소: 진입 경로 화면들의 scoped + 모든 화면 표시(@, 화면 전환 확인용) + 그 화면 콜아웃의 타이틀 */
 	forScreen(screen: string): Record<string, ElementDef>;
 	/** entry의 "#N"(이 화면 N번 콜아웃)·"4.2#5"(다른 화면 콜아웃)를 요소 이름으로 */
@@ -179,12 +184,33 @@ export function buildRegistry(profile: AppProfile): ElementRegistry {
 				return e.callout.startsWith(`${screen}#`);
 			})
 		);
+	/** 진입 경로가 거치는 화면들 (가장 먼 것부터, 이 화면 포함) */
+	const chainOf = (screen: string): string[] => {
+		const chain: string[] = [];
+		for (
+			let sc: string | undefined = screen;
+			sc !== undefined && !chain.includes(sc);
+			sc = profile.screens[sc]?.from
+		) {
+			chain.unshift(sc);
+		}
+		return chain;
+	};
+	const calloutsOf = (screen: string): Record<string, ElementDef> =>
+		Object.fromEntries(Object.entries(elements).filter(([, e]) => e.callout?.startsWith(`${screen}#`) === true));
 	return {
 		elements,
 		callout: (screen, no) => callouts.get(`${screen}#${no}`),
 		title: (screen, no) => titles.get(`${screen}#${no}`),
 		detect: (screen) => `@${screen} 화면`,
 		scoped: registryScoped,
+		upstream: (screen) =>
+			Object.assign(
+				{},
+				...chainOf(screen)
+					.filter((sc) => sc !== screen)
+					.map(calloutsOf)
+			) as Record<string, ElementDef>,
 		forScreen: (screen) => {
 			const out: Record<string, ElementDef> = {};
 			for (const [name, e] of Object.entries(elements)) {
@@ -195,15 +221,7 @@ export function buildRegistry(profile: AppProfile): ElementRegistry {
 				if (key.startsWith(`${screen}#`) && e !== undefined) out[name] = e;
 			}
 			// 진입 경로가 거치는 화면(from)의 콜아웃도 관찰해야 진입 단계를 확인할 수 있다
-			const chain: string[] = [];
-			for (
-				let sc: string | undefined = screen;
-				sc !== undefined && !chain.includes(sc);
-				sc = profile.screens[sc]?.from
-			) {
-				chain.unshift(sc);
-			}
-			return Object.assign(out, ...chain.map(registryScoped)) as Record<string, ElementDef>;
+			return Object.assign(out, ...chainOf(screen).map(registryScoped)) as Record<string, ElementDef>;
 		},
 		resolve: (screen, name) => {
 			if (name.startsWith('#')) return callouts.get(`${screen}${name}`) ?? name;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expectAfterKey, expectedItemIndex, matchByName } from './expect';
+import { containedNameScore, expectAfterKey, expectedItemIndex, matchByName } from './expect';
 import { buildKeyMap } from './keymap';
 import type { KeyAction, NavCallout, NavScreen } from './keymap';
 
@@ -152,5 +152,24 @@ describe('matchByName', () => {
 
 	it('맞는 것이 없으면 고르지 않는다', () => {
 		expect(matchByName('Help 버튼', elements, (e) => e.names)).toBeNull();
+	});
+
+	it('공통 낱말만 같은 다른 요소는 고르지 않는다 (Search!31: 추천 검색어 ↔ 최근 검색어)', () => {
+		const onlyRecent = [
+			{ id: 'recent', names: ['4.3 ① 최근 검색어', '최근 검색어'] },
+			{ id: 'gnb', names: ['GNB', '메뉴'] }
+		];
+		expect(matchByName('추천 검색어', onlyRecent, (e) => e.names)).toBeNull();
+		const withKeywords = [...onlyRecent, { id: 'keywords', names: ['4.2 ② 추천 검색어', '추천 검색어'] }];
+		expect(matchByName('추천 검색어', withKeywords, (e) => e.names)?.match.id).toBe('keywords');
+	});
+});
+
+describe('containedNameScore', () => {
+	it('한쪽 낱말이 다른 쪽에 모두 들어 있을 때만 점수', () => {
+		expect(containedNameScore('추천 검색어', '최근 검색어')).toBe(0);
+		expect(containedNameScore('GNB', 'GNB 검색')).toBeGreaterThan(0);
+		expect(containedNameScore('추천 검색어', '4.2 ② 추천 검색어')).toBeGreaterThan(0.5);
+		expect(containedNameScore('Search box 버튼', 'Search box')).toBe(1);
 	});
 });

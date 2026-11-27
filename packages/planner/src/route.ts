@@ -174,7 +174,7 @@ export function planRoute(
 		reason:
 			blocked.size > 0
 				? `${where}까지 가는 길을 지도에서 찾지 못함 — 해석하지 못한 키 동작 ${blocked.size}개 (TV에서 확인 필요)`
-				: `${where}까지 가는 길이 화면설계서 키 동작에 없음`,
+				: `${where}까지 가는 길이 키 동작(TC·화면설계서)에 없음`,
 		blocked: [...blocked.values()]
 	};
 }

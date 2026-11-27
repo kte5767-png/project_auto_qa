@@ -25,6 +25,8 @@ export interface NavScreen {
 	screenId: string | null;
 	title: string | null;
 	callouts: NavCallout[];
+	/** 화면설계서 화면 설명의 "Default Focus: …" (없으면 없음) */
+	defaultFocus?: string | null;
 }
 
 export type KeyEffect =
