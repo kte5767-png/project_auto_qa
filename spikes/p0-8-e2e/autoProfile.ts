@@ -28,6 +28,25 @@ export const DEFAULT_AUTO_OPTIONS: AutoOptions = {
 };
 
 /**
+ * 아직 정하지 않은 화면 표시: 아무 요소도 가리키지 않는 선택자. 탐색 중에는 이 화면을 "보이는 것"으로 치고
+ * (진입 경로의 확인·OK가 자리 잡을 때까지 기다린다) 탐색이 끝나면 화면끼리 비교해 정한다
+ */
+export const PENDING_DETECT = ':not(*)';
+
+/** 화면이 그대로인가: 보이는 요소의 모양·글자·위치가 모두 같다 (포커스 위치는 보지 않는다) */
+export function sameView(a: DomSnapshot, b: DomSnapshot): boolean {
+	const view = (s: DomSnapshot): string =>
+		s.nodes
+			.filter((n) => n.rect.width > 0 && n.rect.height > 0)
+			.map(
+				(n) =>
+					`${n.tag}.${n.classes.join('.')}|${n.ownText}|${n.value ?? ''}|${Object.values(n.rect).join(',')}`
+			)
+			.join('\n');
+	return view(a) === view(b);
+}
+
+/**
  * 씨앗: 화면설계서 밖에서 정해야 하는 것만 남긴다. 콜아웃에 대응된 공통 요소(사람이 손으로 이은 것)와
  * 이름 대응(aliases), 화면 정의는 뺀다
  */

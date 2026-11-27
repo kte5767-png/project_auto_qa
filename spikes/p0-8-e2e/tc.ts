@@ -132,11 +132,13 @@ import {
 import type { AppProfile, ElementRegistry, ScreenDef } from './profile';
 import {
 	DEFAULT_AUTO_OPTIONS,
+	PENDING_DETECT,
 	autoScreen,
 	chooseDetects,
 	edgeEntry,
 	inputCallout,
 	planAutoEntries,
+	sameView,
 	seedOf,
 	seedQuery
 } from './autoProfile';
@@ -1373,12 +1375,15 @@ class Runner {
 	}
 
 	shown(o: Observation, screen: string): boolean {
+		// 자동 프로필 탐색 중 아직 표시를 정하지 않은 화면: 진입 경로가 자리 잡은 것으로 들어왔다고 본다
+		if (this.ctx.profile.screens[screen]?.detect === PENDING_DETECT) return true;
 		return (target(o, this.ctx.registry.detect(screen))?.visible ?? 0) > 0;
 	}
 
 	/** 두 화면이 같은 요소로 표시되는가 (예: 4.1과 4.2는 같은 검색 패널) */
 	sameDetect(a: string, b: string): boolean {
-		return this.ctx.profile.screens[a]?.detect === this.ctx.profile.screens[b]?.detect;
+		const da = this.ctx.profile.screens[a]?.detect;
+		return da !== undefined && da !== PENDING_DETECT && da === this.ctx.profile.screens[b]?.detect;
 	}
 
 	/** 포커스가 이 화면의 콜아웃 안에 있는가 */
@@ -2732,7 +2737,7 @@ async function autoMain(
 				} else entry = made;
 			}
 			const from = source === 'seed' && item.source === 'auto' ? given?.from : (item.from ?? undefined);
-			const detect = item.from === null ? (given?.detect ?? 'body') : 'body';
+			const detect = item.from === null ? (given?.detect ?? PENDING_DETECT) : PENDING_DETECT;
 			use(screen, {
 				...(titles.get(screen) == null ? {} : { names: [titles.get(screen) as string] }),
 				detect,
@@ -2754,6 +2759,11 @@ async function autoMain(
 			const probes = truthProbes(registry, screen);
 			const snap = await takeDomSnapshot(driver, { probes, ...(focusables === undefined ? {} : { focusables }) });
 			if (snap.errors.length > 0) console.log(`    [주의] ${snap.errors.join(' / ')}`);
+			const fromSnap = from === undefined ? undefined : snaps.get(from);
+			if (fromSnap !== undefined && sameView(fromSnap, snap)) {
+				note += ` (주의: 앞 화면 ${from}과 보이는 요소가 같음 — 진입이 화면을 바꾸지 못했거나 이 실행 환경에서 같은 모습)`;
+				console.log(`    [주의] 앞 화면 ${from}과 보이는 요소가 같음`);
+			}
 			const link = linkScreenToApp(nav, snap);
 			const again = await takeDomSnapshot(driver, { probes: autoProbes(link) });
 			const graded = gradeScreen(screen, link, snap, again, probes);
@@ -2785,6 +2795,8 @@ async function autoMain(
 			if (choice !== null) def.detect = choice.selector;
 			else if (profile.screens[screen] !== undefined) def.detect = profile.screens[screen].detect;
 		}
+		if (def.detect === PENDING_DETECT)
+			errors.push(`${screen}: 화면 표시를 정하지 못함 (TC 실행에서 이 화면을 알아볼 수 없음)`);
 		detectRows.push(
 			`- ${screen}: ${choice === null ? '고르지 못함' : `\`${choice.selector}\` (${choice.reason})`}${root ? ' — 첫 화면은 씨앗 표시를 씀' : choice === null ? ' → 주어진 프로필 표시' : ''}`
 		);

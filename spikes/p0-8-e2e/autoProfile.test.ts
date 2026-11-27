@@ -3,7 +3,7 @@ import type { DomNode, DomSnapshot } from '@auto-qa/focus';
 import { buildScreenGraph } from '@auto-qa/planner';
 import type { AppScreenLink, GraphCallout, GraphScreen, ScreenEdge } from '@auto-qa/planner';
 import { describe, expect, it } from 'vitest';
-import { chooseDetects, edgeEntry, inputCallout, planAutoEntries, seedOf, seedQuery } from './autoProfile';
+import { chooseDetects, edgeEntry, inputCallout, planAutoEntries, sameView, seedOf, seedQuery } from './autoProfile';
 import type { AppProfile } from './profile';
 
 const r = (x: number, y: number, width: number, height: number): Rect => ({ x, y, width, height });
@@ -177,5 +177,11 @@ describe('화면 표시·입력란', () => {
 	it('입력 요소를 담은 콜아웃이 입력란', () => {
 		expect(inputCallout(links.get('9.2') as AppScreenLink, SEARCH)).toBe('1');
 		expect(inputCallout(links.get('9.5') as AppScreenLink, RESULT)).toBeNull();
+	});
+
+	it('보이는 요소가 모두 같으면 화면이 그대로 (포커스만 옮긴 것은 같은 화면)', () => {
+		const moved = { ...SEARCH, nodes: SEARCH.nodes.map((n) => ({ ...n, focused: n.i === 1 })) };
+		expect(sameView(SEARCH, moved)).toBe(true);
+		expect(sameView(SEARCH, RESULT)).toBe(false);
 	});
 });
