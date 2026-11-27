@@ -34,7 +34,7 @@ pnpm spike:e2e spikes/p0-8-e2e/scenario.local.json --spec spikes/p0-8-e2e/spec -
 실제 앱용 시나리오는 회사 앱 정보(선택자·화면설계서 번호)가 들어 있으므로 `*.local.json`으로 두고 커밋하지 않습니다.
 
 - `elements`: 사람이 정한 콜아웃 ↔ 앱 요소 대응 (설계 7.11 ②). `selector`(CSS, `:has()` 금지), `items`(목록 항목), `textIncludes`, `callout`(`"4.2#1"` = 4.2 화면 ①), `names`(화면설계서 문장에서 부르는 이름, 예: `GNB`).
-- `entry`: 시작 화면까지 가는 길. `waitFocus`(앱에 포커스가 생길 때까지), `waitFor`(요소가 보일 때까지), `press` + `until`(그 요소에 갈 때까지 같은 키, 안 되면 `else` 키), `type`(포커스된 입력란에 글자 입력, D-043 ①: 글자 그대로 / `@no-result` 결과 없는 글자 / `@over-limit:255` 상한 + 1자 / `@data:이름` 테스트 데이터, `submit: true`면 확인(Enter)까지). 입력란은 먼저 OK로 편집 상태(TV에서는 키보드 열림)로 만든다. 예: `scenario.sample-search.json`(샘플 앱 검색어 입력 → 결과 없음 → 추천 키워드 → 결과).
+- `entry`: 시작 화면까지 가는 길. `waitFocus`(앱에 포커스가 생길 때까지), `waitFor`(요소가 보일 때까지), `press` + `until`(그 요소에 갈 때까지 같은 키, 안 되면 `else` 키), `type`(포커스된 입력란에 글자 입력, D-043 ①: 글자 그대로 / `@no-result` 결과 없는 글자 / `@over-limit:255` 상한 + 1자 / `@data:이름` 테스트 데이터 / `@most-results` 후보 중 결과가 가장 많은 글자(TC 실행 앱 프로필 전용), `submit: true`면 확인(Enter)까지). 입력란은 먼저 OK로 편집 상태(TV에서는 키보드 열림)로 만든다. 예: `scenario.sample-search.json`(샘플 앱 검색어 입력 → 결과 없음 → 추천 키워드 → 결과).
 - `steps[].checks`
   - `{ "focus": "검색창" }` / `{ "focus": "추천 검색어", "item": 0 }`: 포커스 위치
   - `{ "focus": "@spec" }`: 이 단계의 키마다 화면설계서 이동 지도와 비교
@@ -51,6 +51,7 @@ pnpm spike:e2e spikes/p0-8-e2e/scenario.local.json --spec spikes/p0-8-e2e/spec -
 - 기대 위치: 다른 콜아웃 첫 항목(`move:N:first`), 이동 이력(`+memory`: 그 목록에서 마지막으로 있던 항목, 없으면 첫 항목), 같은 목록 다음·이전(`next`·`prev`), 동작 없음(제자리), 화면 밖(`leave:GNB` → `names`가 맞는 요소).
 - 목록 콜아웃에서 반대 방향 키가 "다음 항목"이면, 목록 끝이 아닐 때는 이전 항목으로 봅니다(화면설계서가 "[◀]: GNB 확장"처럼 첫 항목에서의 동작만 적는 경우).
 - 이름으로 정하지 못해 키 방향으로 추정한 대상은 Pass로 확정하지 않고 확인 필요로 둡니다.
+- 콜아웃 번호가 아닌 이름("추천 검색어", "GNB")으로 가리킨 대상은 이름 낱말이 한쪽에 모두 들어 있는 요소만 고릅니다. "추천 검색어" ↔ "최근 검색어"처럼 서로 다른 낱말이 있으면 고르지 않습니다(확인 불가). TC 실행에서는 진입 경로 앞 화면(`from`)의 콜아웃 중 누르기 전 화면에 보이던 것도 후보입니다(4.3 화면의 "추천 검색어" = 4.2 ②).
 
 ## 샘플 앱 결과 (2026-11-26)
 
@@ -112,6 +113,20 @@ TC 한 줄은 콜아웃 하나의 사양입니다. **앱은 한 번만 열고**,
 - `elements`: 공통 요소 (화면 밖 대상 `GNB` 등, `names`로 화면설계서 문장과 대응, `exit`는 거기서 화면으로 돌아오는 키)
 - `screens["4.2"]`: `detect`(그 화면이 떠 있는지 볼 선택자), `names`(화면 전환 문장 속 이름), `from`(먼저 갈 화면), `entry`(진입 단계, 요소 이름은 공통 이름·`#N`·`4.2#5`), `callouts`(번호 → `selector`·`items`·`title`·`name`)
 - 프로필에 없는 화면·콜아웃은 미실행으로 남기고 이유를 적습니다.
+- 결과가 있어야 하는 화면(검색 결과 등)은 진입 경로의 글자 입력을 `"@most-results"`(기본 후보 a·o·e) 또는 `"@most-results:a,e,i"`로 둡니다. 실행기가 처음 한 번 후보마다 진입해 `most` 요소의 항목 수를 세고, 가장 많은 후보(같으면 앞 후보)를 실행 끝까지 씁니다. 결과가 적으면 "All" 필터·스크롤·맨 위로처럼 결과가 많을 때만 있는 요소를 확인하지 못해 오탐(Fail)이 나기 때문입니다. 고른 값과 후보별 개수는 `report.md` 머리말과 `result.json`의 `choices`에 남습니다. 예:
+
+  ```json
+  "4.5": {
+  	"from": "4.2",
+  	"entry": [
+  		{ "press": "UP", "until": "4.2#1", "max": 2 },
+  		{ "press": "OK" },
+  		{ "type": "@most-results", "submit": true, "most": "#3" },
+  		{ "waitFor": "#3", "timeoutMs": 30000 }
+  	]
+  }
+  ```
+
 - `reset`(선택, D-039): `layers`(겹친 층 선택자, 기본 `#floatLayer > *, [role="dialog"], …`), `focusables`, `minSimilarity`, `backKey`, `closePopupKey`, `forbidden`(기본 `["OK"]`). 영역 나가기 키는 공통 요소의 `exit`를 씁니다. 지금은 사람이 적지만, 화면설계서 정책 페이지(Back 정책)에서 로컬 LLM이 초안을 만드는 것이 다음 단계입니다.
 
 ### 정확도 (사람 판정과 비교)

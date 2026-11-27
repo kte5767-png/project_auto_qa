@@ -1,6 +1,6 @@
 import { isRemoteKey } from '@auto-qa/core';
 import type { RemoteKey } from '@auto-qa/core';
-import { textValueError } from '@auto-qa/planner';
+import { textCandidates, textValueError } from '@auto-qa/planner';
 
 /**
  * 간단 E2E 시나리오 (사람이 쓴 실행 계획의 축소판, 설계 7.11).
@@ -28,11 +28,12 @@ export type EntryStep =
 	| { waitFor: string; timeoutMs?: number }
 	| { waitFocus: true; timeoutMs?: number }
 	/**
-	 * 글자 입력 (D-043 ①): 포커스된 입력란에 넣는다. 값은 글자 그대로, `@no-result`, `@over-limit:N`, `@data:이름`
-	 * (`@auto-qa/planner` resolveTextValue). replace 기본 true(기존 글자를 지움), submit 기본 false(확인 안 보냄).
-	 * seed는 무작위 글자의 seed (프로필은 화면 번호를 넣는다)
+	 * 글자 입력 (D-043 ①): 포커스된 입력란에 넣는다. 값은 글자 그대로, `@no-result`, `@over-limit:N`, `@data:이름`,
+	 * `@most-results[:a,o,e]` (`@auto-qa/planner` resolveTextValue). replace 기본 true(기존 글자를 지움),
+	 * submit 기본 false(확인 안 보냄). seed는 무작위 글자의 seed (프로필은 화면 번호를 넣는다).
+	 * most는 `@most-results`에서 결과 항목 수를 셀 요소 (TC 실행 앱 프로필 전용: 후보마다 진입해 세어 보고 가장 많은 것을 쓴다)
 	 */
-	| { type: string; replace?: boolean; submit?: boolean; seed?: string };
+	| { type: string; replace?: boolean; submit?: boolean; seed?: string; most?: string };
 
 export type CheckDef =
 	/** 포커스: 요소 이름, 또는 "@spec"(화면설계서 이동 지도로 계산). item = 몇 번째 항목(0부터) */
@@ -131,6 +132,10 @@ export function validateScenario(data: unknown): string[] {
 		else if ('type' in step) {
 			const error = typeof step.type === 'string' ? textValueError(step.type) : '글자가 아님';
 			if (error !== null) errors.push(`${where}: ${error}`);
+			else if (textCandidates(step.type) !== null)
+				errors.push(
+					`${where}: @most-results는 TC 실행(앱 프로필)에서만 쓴다 — 시나리오에는 글자를 직접 적는다`
+				);
 		}
 	});
 	(s.steps ?? []).forEach((step, i) => {

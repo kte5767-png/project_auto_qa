@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { noResultText, overLimitText, resolveTextValue, textValueError } from './textValue';
+import {
+	DEFAULT_RESULT_CANDIDATES,
+	noResultText,
+	overLimitText,
+	pickMostResults,
+	resolveTextValue,
+	textCandidates,
+	textValueError
+} from './textValue';
 
 const ctx = { seed: '4.6', data: { flight: 'Seoul to Bali' } };
 
@@ -31,6 +39,68 @@ describe('resolveTextValue', () => {
 			error: expect.stringContaining('"hotel"')
 		});
 	});
+
+	it('@most-results는 실행기가 고른 값을 쓰고, 고르기 전에는 이유', () => {
+		expect(resolveTextValue('@most-results', ctx)).toEqual({ error: expect.stringContaining('아직 고르지 않음') });
+		expect(resolveTextValue('@most-results', { ...ctx, chosen: { '@most-results': 'o' } })).toEqual({
+			value: 'o',
+			kind: 'most-results'
+		});
+		// 후보가 다른 글자는 따로 고른다
+		expect(resolveTextValue('@most-results:x,y', { ...ctx, chosen: { '@most-results': 'o' } })).toHaveProperty(
+			'error'
+		);
+	});
+});
+
+describe('textCandidates', () => {
+	it('기본 후보는 a·o·e, 직접 적으면 그 순서대로', () => {
+		expect(textCandidates('@most-results')).toEqual([...DEFAULT_RESULT_CANDIDATES]);
+		expect(DEFAULT_RESULT_CANDIDATES).toEqual(['a', 'o', 'e']);
+		expect(textCandidates('@most-results:e, i ,u')).toEqual(['e', 'i', 'u']);
+	});
+
+	it('@most-results가 아니면 null', () => {
+		expect(textCandidates('Bali')).toBeNull();
+		expect(textCandidates('@no-result')).toBeNull();
+	});
+});
+
+describe('pickMostResults', () => {
+	it('결과가 가장 많은 후보', () => {
+		expect(
+			pickMostResults([
+				{ value: 'a', count: 3 },
+				{ value: 'o', count: 12 },
+				{ value: 'e', count: 7 }
+			])
+		).toEqual({ value: 'o', count: 12 });
+	});
+
+	it('같으면 앞 후보 (같은 입력이면 같은 결과)', () => {
+		expect(
+			pickMostResults([
+				{ value: 'a', count: 8 },
+				{ value: 'o', count: 8 }
+			])
+		).toEqual({ value: 'a', count: 8 });
+	});
+
+	it('결과 화면에 못 갔거나 0개인 후보는 빼고, 모두 그렇면 null', () => {
+		expect(
+			pickMostResults([
+				{ value: 'a', count: null },
+				{ value: 'o', count: 2 }
+			])
+		).toEqual({ value: 'o', count: 2 });
+		expect(
+			pickMostResults([
+				{ value: 'a', count: 0 },
+				{ value: 'o', count: null }
+			])
+		).toBeNull();
+		expect(pickMostResults([])).toBeNull();
+	});
 });
 
 describe('textValueError', () => {
@@ -43,5 +113,11 @@ describe('textValueError', () => {
 		expect(textValueError('@no-result:0')).toContain('길이');
 		expect(textValueError('@data:')).toContain('이름');
 		expect(textValueError('@random')).toContain('모르는');
+		expect(textValueError('@most-results')).toBeNull();
+		expect(textValueError('@most-results:a,o')).toBeNull();
+		expect(textValueError('@most-results:')).toContain('빈 글자');
+		expect(textValueError('@most-results:a,,o')).toContain('빈 글자');
+		expect(textValueError('@most-results:a,a')).toContain('겹침');
+		expect(textValueError('@most-results:a,b,c,d,e,f,g,h,i,j,k')).toContain('10개까지');
 	});
 });

@@ -355,14 +355,19 @@ export interface SpecContext {
 	options: KeyMapOptions;
 }
 
-/** 키 한 번의 이동을 화면설계서 이동 지도로 확인 */
+/**
+ * 키 한 번의 이동을 화면설계서 이동 지도로 확인.
+ * nameScope: 콜아웃 번호가 아닌 이름("추천 검색어", "GNB")으로 가리킨 대상을 찾을 요소. 기본은 elements이고,
+ * 앞 화면 위에 영역이 더해진 화면(4.3)에서는 화면에 함께 보이는 앞 화면의 콜아웃을 더해 준다
+ */
 export function checkSpecMove(
 	elements: Record<string, ElementDef>,
 	spec: SpecContext,
 	before: Observation,
 	key: RemoteKey,
 	after: Observation,
-	remembered: ReadonlyMap<string, number>
+	remembered: ReadonlyMap<string, number>,
+	nameScope: Record<string, ElementDef> = elements
 ): CheckResult {
 	const label = `[${KEY_LABEL[key]}] 화면설계서 이동`;
 	const specKey = SPEC_KEY[key];
@@ -397,7 +402,7 @@ export function checkSpecMove(
 		if (want === undefined) return result(clause, 'key', null, `${ref.screen} ${no}번 콜아웃에 대응된 요소가 없음`);
 	} else {
 		const name = exp.target.kind === 'element' ? exp.target.name : exp.target.to;
-		const m = matchByName(name, entries, ([n, e]) => [n, ...(e.names ?? [])], spec.options);
+		const m = matchByName(name, Object.entries(nameScope), ([n, e]) => [n, ...(e.names ?? [])], spec.options);
 		if (m === null) return result(clause, 'key', null, `"${name}"에 대응된 요소가 없음`);
 		want = m.match;
 	}
