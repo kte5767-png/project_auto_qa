@@ -87,7 +87,7 @@ function withoutNumbers(text: string): string {
 }
 
 /** 의미 있는 글자만 (자리표시·숫자·기호·너무 짧은 글자 제외, 같은 글자는 하나로) */
-function meaningful(texts: readonly string[], minLength = 3): string[] {
+export function meaningful(texts: readonly string[], minLength = 3): string[] {
 	const out = new Map<string, string>();
 	for (const raw of texts) {
 		const t = withoutNumbers(raw.split('\n')[0]?.trim() ?? '');

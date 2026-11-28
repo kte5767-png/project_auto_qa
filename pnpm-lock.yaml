@@ -183,6 +183,9 @@ importers:
       '@auto-qa/figma':
         specifier: workspace:*
         version: link:../figma
+      '@auto-qa/focus':
+        specifier: workspace:*
+        version: link:../focus
       '@auto-qa/spec':
         specifier: workspace:*
         version: link:../spec

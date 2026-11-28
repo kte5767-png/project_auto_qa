@@ -14,6 +14,7 @@ import type { Observation, ObserveTarget, ObservedTarget } from '@auto-qa/focus'
 import type { Check, CheckKind, CheckResult, Verdict } from '@auto-qa/judge';
 import {
 	buildKeyMap,
+	graphScreenFromSpec,
 	describeEffect,
 	expectAfterKey,
 	expectedItemIndex,
@@ -23,9 +24,9 @@ import {
 	resolveAbsentCondition,
 	resolveTextValue
 } from '@auto-qa/planner';
-import type { KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
+import type { GraphScreen, KeyAction, KeyMapOptions, NavScreen } from '@auto-qa/planner';
 import { extractSpecScreen, mergeSpecScreens } from '@auto-qa/spec';
-import type { SpecKey, SpecScreen } from '@auto-qa/spec';
+import type { MergedSpecScreen, SpecKey, SpecScreen } from '@auto-qa/spec';
 import { parseCalloutRef } from './scenario';
 import type { ElementDef, EntryStep, Timing } from './scenario';
 
@@ -60,8 +61,10 @@ export async function jsonFiles(paths: readonly string[], cwd: string): Promise<
 	return out;
 }
 
-/** 화면설계서 내보내기 → 화면 번호별 이동 지도 입력 (콜아웃 이름·위치·목업 글자·키 동작 문장) */
-export async function loadNavScreens(paths: readonly string[]): Promise<Map<string, NavScreen>> {
+/** 화면설계서 내보내기 → 정규화 프레임 + 합친 화면 */
+async function loadSpec(
+	paths: readonly string[]
+): Promise<{ frames: Map<string, NormalizedFrame>; merged: MergedSpecScreen[] }> {
 	// 나눠 내보낸 파일(-p01of18…)을 한 폴더에서 읽는다. 같은 프레임을 다시 내보냈으면 나중 파일(이름순)을 쓴다
 	const frames = new Map<string, NormalizedFrame>();
 	for (const f of paths) {
@@ -70,12 +73,24 @@ export async function loadNavScreens(paths: readonly string[]): Promise<Map<stri
 		}
 	}
 	const specs: SpecScreen[] = [...frames.values()].map((frame) => extractSpecScreen(frame));
+	return { frames, merged: mergeSpecScreens(specs) };
+}
+
+/** 화면설계서 내보내기 → 화면 번호별 이동 지도 입력 (콜아웃 이름·위치·목업 글자·키 동작 문장) */
+export async function loadNavScreens(paths: readonly string[]): Promise<Map<string, NavScreen>> {
+	const { frames, merged } = await loadSpec(paths);
 	const navs = new Map<string, NavScreen>();
-	for (const merged of mergeSpecScreens(specs)) {
-		const screen = navScreenFromSpec(merged, frames);
+	for (const m of merged) {
+		const screen = navScreenFromSpec(m, frames);
 		if (screen.screenId !== null) navs.set(screen.screenId, screen);
 	}
 	return navs;
+}
+
+/** 화면설계서 내보내기 → 화면 이동 지도 입력 (콜아웃 "선택 시" 문장·진입 조건) */
+export async function loadGraphScreens(paths: readonly string[]): Promise<GraphScreen[]> {
+	const { merged } = await loadSpec(paths);
+	return merged.map((m) => graphScreenFromSpec(m)).filter((g): g is GraphScreen => g !== null);
 }
 
 /** 화면설계서 내보내기 → 화면 번호별 이동 지도 */
@@ -270,10 +285,16 @@ export async function runEntry(
 	session: Session,
 	entry: readonly EntryStep[],
 	trail: Trail[],
-	testData: Readonly<Record<string, string>> = {}
+	testData: Readonly<Record<string, string>> = {},
+	/** focus 단계: 요소로 포커스를 옮긴다 (TC 실행기가 이동 지도로). 못 가면 이유 */
+	reach?: (name: string) => Promise<string | null>
 ): Promise<string | null> {
 	for (const step of entry) {
-		if ('type' in step) {
+		if ('focus' in step) {
+			if (reach === undefined) return `"${step.focus}"로 포커스 옮기기(focus)는 TC 실행에서만 쓸 수 있음`;
+			const error = await reach(step.focus);
+			if (error !== null) return error;
+		} else if ('type' in step) {
 			const error = await typeEntry(session, step, trail, testData);
 			if (error !== null) return error;
 		} else if ('waitFocus' in step) {

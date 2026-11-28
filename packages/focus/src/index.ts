@@ -36,3 +36,13 @@ export type { MotionSample } from './motion';
 export { compareMotion, motionScript, sampleMotion } from './motion';
 export type { FieldView } from './field';
 export { fieldOverflows, fieldScript, fieldShowsEnd, readField } from './field';
+export type { DomNode, DomSnapshot, SnapshotOptions, SnapshotProbe } from './snapshot';
+export {
+	DEFAULT_SNAPSHOT_OPTIONS,
+	childrenOf,
+	focusableCount,
+	isAncestorNode,
+	nodeTexts,
+	snapshotScript,
+	takeDomSnapshot
+} from './snapshot';

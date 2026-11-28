@@ -6,3 +6,6 @@ export * from './textValue';
 export * from './tcKeys';
 export * from './defaultFocus';
 export * from './operation';
+export * from './appLink';
+export * from './screenGraph';
+export * from './screenDetect';
